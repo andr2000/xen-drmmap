@@ -19,8 +19,6 @@
 #ifndef __XEN_DRM_MAP_H
 #define __XEN_DRM_MAP_H
 
-#include <drm/drmP.h>
-
 #define XENDRMMAP_DRIVER_NAME	"xen-drmmap"
 
 /*
