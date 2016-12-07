@@ -21,6 +21,8 @@
 
 #include <drm/drmP.h>
 
+#define XENDRMMAP_DRIVER_NAME	"xen-drmmap"
+
 /*
  * Xen DRM map specific ioctls.
  *
@@ -45,4 +47,3 @@ struct xendrmmap_ioctl_unmap {
 	struct xendrmmap_ioctl_unmap)
 
 #endif /* __XEN_DRM_MAP_H*/
-

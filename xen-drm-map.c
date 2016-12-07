@@ -29,7 +29,6 @@ struct xendrmmap_info {
 
 #define XENDRMMAP_DRIVER_NAME	"xen-drmmap"
 
-
 static const struct file_operations xendrm_fops = {
 	.owner          = THIS_MODULE,
 	.open           = drm_open,
@@ -77,7 +76,7 @@ static struct drm_driver xendrmmap_driver = {
 	.fops                      = &xendrm_fops,
 	.ioctls                    = xendrmmap_ioctls,
 	.num_ioctls                = ARRAY_SIZE(xendrmmap_ioctls),
-	.name                      = "xendrm-mapper",
+	.name                      = XENDRMMAP_DRIVER_NAME,
 	.desc                      = "Xen PV DRM mapper",
 	.date                      = "20161207",
 	.major                     = 1,
@@ -168,6 +167,7 @@ static int __init xendrmmap_init(void)
 
 static void __exit xendrmmap_cleanup(void)
 {
+	platform_driver_unregister(&xendrmmap_ddrv_info);
 	if (xendrmmap_pdev)
 		platform_device_unregister(xendrmmap_pdev);
 }
