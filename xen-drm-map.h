@@ -32,7 +32,7 @@
 #define DRM_XENXEN_UNMAP	0x01
 
 struct xendrmmap_ioctl_map {
-	int dummy;
+	uint32_t fd;
 };
 
 struct xendrmmap_ioctl_unmap {

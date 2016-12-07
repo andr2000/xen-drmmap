@@ -50,6 +50,9 @@ static int xendrmmap_ioctl_map(struct drm_device *dev, void *data,
 	struct xendrmmap_ioctl_map *m = (struct xendrmmap_ioctl_map *)data;
 
 	DRM_DEBUG("m %p\n", m);
+	if (!m)
+		return -EINVAL;
+	DRM_DEBUG("Prime fd %u\n", m->fd);
 	return 0;
 }
 
