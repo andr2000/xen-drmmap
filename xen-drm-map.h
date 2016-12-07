@@ -36,7 +36,7 @@ struct xendrmmap_ioctl_map {
 };
 
 struct xendrmmap_ioctl_unmap {
-	int dummy;
+	uint32_t fd;
 };
 
 #define DRM_IOCTL_XENDRM_MAP	DRM_IOW(DRM_COMMAND_BASE + DRM_XENDRM_MAP, \

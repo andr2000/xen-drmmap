@@ -19,6 +19,7 @@
 #include <drm/drm_fb_cma_helper.h>
 #include <drm/drm_gem_cma_helper.h>
 
+#include <linux/dma-buf.h>
 #include <linux/platform_device.h>
 
 #include "xen-drm-map.h"
@@ -44,25 +45,102 @@ static const struct file_operations xendrm_fops = {
 	.llseek         = no_llseek,
 };
 
+static int memset_page(void *addr, int color)
+{
+	if (!addr)
+		return -ENOMEM;
+	memset(addr, color, PAGE_SIZE);
+	return 0;
+}
+
 static int xendrmmap_ioctl_map(struct drm_device *dev, void *data,
 	struct drm_file *file_priv)
 {
 	struct xendrmmap_ioctl_map *m = (struct xendrmmap_ioctl_map *)data;
+	struct dma_buf *dma_buf;
+	struct dma_buf_attachment *attach;
+	struct sg_table *sg;
+	struct sg_page_iter piter;
+	int ret, i;
 
 	DRM_DEBUG("m %p\n", m);
 	if (!m)
 		return -EINVAL;
 	DRM_DEBUG("Prime fd %u\n", m->fd);
-	return 0;
+	dma_buf = dma_buf_get(m->fd);
+	if (IS_ERR(dma_buf)) {
+		DRM_ERROR("Prime fd %u not found, ret %lu\n",
+			m->fd, PTR_ERR(dma_buf));
+		return PTR_ERR(dma_buf);
+	}
+	DRM_DEBUG("Prime fd %u found, dma_buf at %p size %zu\n",
+		m->fd, dma_buf, dma_buf->size);
+
+	attach = dma_buf_attach(dma_buf, dev->dev);
+	if (!attach) {
+		DRM_ERROR("Failed to attach DMA buffer for fd %u, ret %lu\n",
+			m->fd, PTR_ERR(attach));
+		return PTR_ERR(attach);
+	}
+	DRM_DEBUG("Attached %p, prime fd %u, dma_buf at %p size %zu\n",
+		attach, m->fd, dma_buf, dma_buf->size);
+	sg = dma_buf_map_attachment(attach, DMA_BIDIRECTIONAL);
+	if (!sg) {
+		DRM_ERROR("Failed to map attachment, ret %lu\n",
+			PTR_ERR(attach));
+		ret = PTR_ERR(attach);
+		goto out_detach;
+	}
+	i = 0;
+	DRM_DEBUG("Number of segments in the table: %d is contiguous %d\n",
+		sg->nents, sg->nents == 1);
+
+	for_each_sg_page(sg->sgl, &piter, sg->nents, 0) {
+		struct page *page;
+		dma_addr_t dma_addr;
+
+		page = sg_page_iter_page(&piter);
+		dma_addr = sg_page_iter_dma_address(&piter);
+		memset_page(page_to_virt(page), 0x7f + i);
+		i++;
+	}
+	DRM_DEBUG("Filled %d pages\n", i);
+	DRM_DEBUG("Unmapping attachment\n");
+	dma_buf_unmap_attachment(attach, sg, DMA_BIDIRECTIONAL);
+	ret = 0;
+out_detach:
+#if 0
+	DRM_DEBUG("Detaching dma_buf\n");
+	dma_buf_detach(dma_buf, attach);
+	dma_buf_put(dma_buf);
+#endif
+	return ret;
 }
 
 static int xendrmmap_ioctl_unmap(struct drm_device *dev, void *data,
 	struct drm_file *file_priv)
 {
 	struct xendrmmap_ioctl_unmap *m = (struct xendrmmap_ioctl_unmap *)data;
+	struct dma_buf *dma_buf;
+	struct dma_buf_attachment *attach;
+	struct sg_table *sg;
+	struct sg_page_iter piter;
+	int ret, i;
 
 	DRM_DEBUG("m %p\n", m);
-	return 0;
+	if (!m)
+		return -EINVAL;
+	DRM_DEBUG("Prime fd %u\n", m->fd);
+	dma_buf = dma_buf_get(m->fd);
+	if (IS_ERR(dma_buf)) {
+		DRM_ERROR("Prime fd %u not found, ret %lu\n",
+			m->fd, PTR_ERR(dma_buf));
+		return PTR_ERR(dma_buf);
+	}
+	DRM_DEBUG("Detaching dma_buf\n");
+	dma_buf_detach(dma_buf, attach);
+	dma_buf_put(dma_buf);
+	return ret;
 }
 
 static const struct drm_ioctl_desc xendrmmap_ioctls[] = {
