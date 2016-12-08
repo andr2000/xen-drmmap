@@ -42,7 +42,7 @@ struct xendrmmap_ioctl_create_dumb {
 	struct drm_mode_create_dumb dumb;
 };
 
-#define DRM_IOCTL_XENDRM_CREATE_DUMB	DRM_IOW(DRM_COMMAND_BASE + \
+#define DRM_IOCTL_XENDRM_CREATE_DUMB	DRM_IOWR(DRM_COMMAND_BASE + \
 	DRM_XENDRM_CREATE_DUMB, struct xendrmmap_ioctl_create_dumb)
 
 #endif /* __XEN_DRM_MAP_H*/
