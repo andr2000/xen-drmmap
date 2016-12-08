@@ -34,10 +34,8 @@ struct xendrmmap_info {
 
 struct xendrmmap_gem_object {
 	struct drm_gem_object base;
-	struct sg_table *sgt;
-	uint32_t num_grefs;
-	uint64_t otherend_id;
-	grant_ref_t *grefs;
+	struct page **pages;
+	struct xendrmmap_ioctl_create_dumb dumb_obj;
 };
 
 static inline struct xendrmmap_gem_object *
@@ -45,8 +43,10 @@ to_xendrmmap_gem_obj(struct drm_gem_object *gem_obj)
 {
 	return container_of(gem_obj, struct xendrmmap_gem_object, base);
 }
+
 static int xendrmmap_do_map(struct xendrmmap_gem_object *xen_obj)
 {
+#if 0
 	struct sg_page_iter piter;
 
 	for_each_sg_page(xen_obj->sgt->sgl, &piter,
@@ -57,130 +57,208 @@ static int xendrmmap_do_map(struct xendrmmap_gem_object *xen_obj)
 		page = sg_page_iter_page(&piter);
 		dma_addr = sg_page_iter_dma_address(&piter);
 	}
-	return -EINVAL;
-}
-
-static int xendrmmap_ioctl_map(struct drm_device *dev, void *data,
-	struct drm_file *file_priv)
-{
-	struct xendrmmap_ioctl_map *map = (struct xendrmmap_ioctl_map *)data;
-	struct xendrmmap_gem_object *xen_obj;
-	struct drm_gem_object *gem_obj;
-	int sz, ret;
-
-	DRM_DEBUG("++++++++++++ m %p\n", map);
-	if (!map)
-		return -EINVAL;
-	gem_obj = drm_gem_object_lookup(file_priv, map->handle);
-	DRM_DEBUG("++++++++++++ Prime handle %u gem_obj %p\n",
-		map->handle, gem_obj);
-	if (!gem_obj)
-		return -EINVAL;
-	drm_gem_object_unreference_unlocked(gem_obj);
-
-	if (map->num_grefs > DIV_ROUND_UP(gem_obj->dma_buf->size, PAGE_SIZE)) {
-		DRM_ERROR("++++++++++++ Trying to map %d pages while donor has only %lu\n",
-			map->num_grefs,
-			DIV_ROUND_UP(gem_obj->dma_buf->size, PAGE_SIZE));
-		return -EINVAL;
-	}
-	xen_obj = to_xendrmmap_gem_obj(gem_obj);
-	if (xen_obj->grefs) {
-		DRM_ERROR("++++++++++++ Already mapped\n");
-		return -EINVAL;
-	}
-	DRM_DEBUG("++++++++++++ Mapping GEM object: sgt %p\n", xen_obj->sgt);
-	xen_obj->num_grefs = map->num_grefs;
-	xen_obj->otherend_id = map->otherend_id;
-	sz = xen_obj->num_grefs * sizeof(grant_ref_t);
-	xen_obj->grefs = kmalloc(sz, GFP_KERNEL);
-	if (!xen_obj->grefs) {
-		ret = -ENOMEM;
-		goto fail;
-	}
-	if (copy_from_user(xen_obj->grefs, map->grefs, sz) != sz) {
-		ret = -EINVAL;
-		goto fail;
-	}
-	ret = xendrmmap_do_map(xen_obj);
-	if (ret < 0)
-		goto fail;
+#endif
 	return 0;
-fail:
-	if (xen_obj->grefs)
-		kfree(xen_obj->grefs);
-	xen_obj->grefs = NULL;
-	xen_obj->num_grefs = 0;
-	return ret;
 }
 
-static struct xendrmmap_gem_object *xendrmmap_obj_create(
-	struct drm_device *drm, size_t size)
+static int xendrmmap_do_unmap(struct xendrmmap_gem_object *xen_obj)
 {
-	struct xendrmmap_gem_object *xen_obj;
-	int ret;
+#if 0
+	struct sg_page_iter piter;
 
-	xen_obj = kzalloc(sizeof(*xen_obj), GFP_KERNEL);
-	if (!xen_obj)
-		return ERR_PTR(-ENOMEM);
-	ret = drm_gem_object_init(drm, &xen_obj->base, size);
-	if (ret < 0) {
-		DRM_DEBUG("++++++++++++ Failed to initialize GEM, ret %d\n", ret);
-		goto error;
+	for_each_sg_page(xen_obj->sgt->sgl, &piter,
+			xen_obj->sgt->nents, 0) {
+		struct page *page;
+		dma_addr_t dma_addr;
+
+		page = sg_page_iter_page(&piter);
+		dma_addr = sg_page_iter_dma_address(&piter);
 	}
-	return xen_obj;
-
-error:
-	kfree(xen_obj);
-	return ERR_PTR(ret);
+#endif
+	return 0;
 }
 
-static struct drm_gem_object *xendrmmap_gem_prime_import_sg_table(
-	struct drm_device *dev, struct dma_buf_attachment *attach,
-	struct sg_table *sgt)
-{
-	struct xendrmmap_gem_object *xen_obj;
-
-	DRM_DEBUG("++++++++++++ Number of segments in the sg table: %d, size %zu at %p\n",
-		sgt->nents, attach->dmabuf->size, sgt);
-	/* Create a Xen GEM buffer. */
-	xen_obj = xendrmmap_obj_create(dev, attach->dmabuf->size);
-	if (IS_ERR(xen_obj))
-		return ERR_CAST(xen_obj);
-
-	xen_obj->sgt = sgt;
-	DRM_DEBUG("++++++++++++ Done importing\n");
-	return &xen_obj->base;
-}
 
 static void xendrmmap_gem_close_object(struct drm_gem_object *gem_obj,
 	struct drm_file *file_priv)
 {
 	struct xendrmmap_gem_object *xen_obj = to_xendrmmap_gem_obj(gem_obj);
 
-	DRM_DEBUG("++++++++++++ Closing GEM object: sgt %p\n",
-		xen_obj->sgt);
-	/* TODO: unmap here */
+	DRM_DEBUG("++++++++++++ Closing GEM object\n");
+	xendrmmap_do_unmap(xen_obj);
 }
 
 static void xendrmmap_gem_free_object(struct drm_gem_object *gem_obj)
 {
 	struct xendrmmap_gem_object *xen_obj = to_xendrmmap_gem_obj(gem_obj);
 
-	DRM_DEBUG("++++++++++++ Freeing GEM object: sgt %p\n",
-		xen_obj->sgt);
-
-	if (gem_obj->import_attach)
-		drm_prime_gem_destroy(gem_obj, xen_obj->sgt);
+	DRM_DEBUG("++++++++++++ Freeing GEM object\n");
 	drm_gem_object_release(gem_obj);
-	if (xen_obj->grefs)
-		kfree(xen_obj->grefs);
+	if (xen_obj->dumb_obj.grefs)
+		kfree(xen_obj->dumb_obj.grefs);
+	if (xen_obj->pages)
+		kfree(xen_obj->pages);
 	kfree(xen_obj);
 }
 
+static int xendrmmap_gem_create_with_handle(
+	struct xendrmmap_gem_object *xen_obj, struct drm_file *file_priv,
+	struct drm_device *dev, size_t size)
+{
+	struct drm_gem_object *gem_obj;
+	int ret;
+
+	ret = drm_gem_object_init(dev, &xen_obj->base, size);
+	if (ret < 0) {
+		DRM_DEBUG("++++++++++++ Failed to initialize GEM, ret %d\n",
+			ret);
+		return ret;
+	}
+	ret = drm_gem_create_mmap_offset(gem_obj);
+	if (ret < 0) {
+		drm_gem_object_release(gem_obj);
+		return ret;
+	}
+	gem_obj = &xen_obj->base;
+	/*
+	 * allocate a id of idr table where the obj is registered
+	 * and handle has the id that user can see.
+	 */
+	ret = drm_gem_handle_create(file_priv, gem_obj,
+		&xen_obj->dumb_obj.dumb.handle);
+	/* drop reference from allocate - handle holds it now. */
+	drm_gem_object_unreference_unlocked(gem_obj);
+	return ret;
+}
+
+static int xendrm_create_dumb_obj(struct xendrmmap_gem_object *xen_obj,
+	struct drm_device *dev, void *data, struct drm_file *file_priv)
+{
+	struct xendrmmap_ioctl_create_dumb *xen_args =
+		(struct xendrmmap_ioctl_create_dumb *)data;
+	struct drm_mode_create_dumb *args = &xen_args->dumb;
+	struct drm_gem_object *gem_obj;
+	int ret;
+
+	ret = xendrmmap_gem_create_with_handle(xen_obj, file_priv, dev,
+		args->size);
+	if (ret < 0)
+		goto fail;
+	gem_obj = drm_gem_object_lookup(file_priv, args->handle);
+	if (!gem_obj) {
+		ret = -EINVAL;
+		goto fail_destroy;
+	}
+	drm_gem_object_unreference_unlocked(gem_obj);
+	return 0;
+
+fail_destroy:
+	drm_gem_dumb_destroy(file_priv, dev, args->handle);
+fail:
+	DRM_ERROR("++++++++++++ Failed to create dumb buffer, ret %d\n", ret);
+	return ret;
+}
+
+static int xendrm_do_dumb_create(struct drm_device *dev, void *data,
+	struct drm_file *file_priv)
+{
+	struct xendrmmap_ioctl_create_dumb *args =
+		(struct xendrmmap_ioctl_create_dumb *)data;
+	struct xendrmmap_gem_object *xen_obj;
+	int sz, ret;
+
+	DRM_DEBUG("++++++++++++ args at %p\n", args);
+	if (!args)
+		return -EINVAL;
+	if (args->num_grefs > DIV_ROUND_UP(args->dumb.size, PAGE_SIZE)) {
+		DRM_ERROR("++++++++++++ Provided %d pages, required %d\n",
+			args->num_grefs,
+			(int)DIV_ROUND_UP(args->dumb.size, PAGE_SIZE));
+		return -EINVAL;
+	}
+	xen_obj = kzalloc(sizeof(*xen_obj), GFP_KERNEL);
+	if (!xen_obj)
+		return -ENOMEM;
+	DRM_DEBUG("++++++++++++ Creating DUMB\n");
+	xen_obj->dumb_obj.dumb = args->dumb;
+	sz = args->num_grefs * sizeof(grant_ref_t);
+	xen_obj->dumb_obj.grefs = kmalloc(sz, GFP_KERNEL);
+	if (!xen_obj->dumb_obj.grefs) {
+		ret = -ENOMEM;
+		goto fail;
+	}
+	if (copy_from_user(xen_obj->dumb_obj.grefs, args->grefs, sz) != sz) {
+		ret = -EINVAL;
+		goto fail;
+	}
+	sz = args->num_grefs * sizeof(struct page *);
+	xen_obj->pages = kmalloc(sz, GFP_KERNEL);
+	if (!xen_obj->pages) {
+		ret = -ENOMEM;
+		goto fail;
+	}
+	ret = xendrmmap_do_map(xen_obj);
+	if (ret < 0)
+		goto fail;
+	return xendrm_create_dumb_obj(xen_obj, dev, data, file_priv);
+
+fail:
+	if (xen_obj->dumb_obj.grefs)
+		kfree(xen_obj->dumb_obj.grefs);
+	xen_obj->dumb_obj.grefs = NULL;
+	if (xen_obj->pages)
+		kfree(xen_obj->pages);
+	xen_obj->pages = NULL;
+	return ret;
+}
+
+static int xendrmmap_create_dumb_ioctl(struct drm_device *dev,
+	void *data, struct drm_file *file_priv)
+{
+	struct xendrmmap_ioctl_create_dumb *xen_args =
+		(struct xendrmmap_ioctl_create_dumb *)data;
+	struct drm_mode_create_dumb *args = &xen_args->dumb;
+	u32 cpp, stride, size;
+
+	if (!dev->driver->dumb_create)
+		return -ENOSYS;
+	if (!args->width || !args->height || !args->bpp)
+		return -EINVAL;
+
+	/* overflow checks for 32bit size calculations */
+	/* NOTE: DIV_ROUND_UP() can overflow */
+	cpp = DIV_ROUND_UP(args->bpp, 8);
+	if (!cpp || cpp > 0xffffffffU / args->width)
+		return -EINVAL;
+	stride = cpp * args->width;
+	if (args->height > 0xffffffffU / stride)
+		return -EINVAL;
+
+	/* test for wrap-around */
+	size = args->height * stride;
+	if (PAGE_ALIGN(size) == 0)
+		return -EINVAL;
+
+	/* this are the output parameters */
+	args->pitch = DIV_ROUND_UP(args->width * args->bpp, 8);
+	args->size = args->pitch * args->height;
+	args->handle = 0;
+	return xendrm_do_dumb_create(dev, data, file_priv);
+}
+
+struct sg_table *xendrmmap_gem_prime_get_sg_table(
+	struct drm_gem_object *gem_obj)
+{
+	struct xendrmmap_gem_object *xen_obj = to_xendrmmap_gem_obj(gem_obj);
+
+	DRM_DEBUG("++++++++++++ Exporting sgt\n");
+	return drm_prime_pages_to_sg(xen_obj->pages,
+		xen_obj->dumb_obj.num_grefs);
+}
+
 static const struct drm_ioctl_desc xendrmmap_ioctls[] = {
-	DRM_IOCTL_DEF_DRV(XENDRM_MAP, xendrmmap_ioctl_map, DRM_AUTH |
-		DRM_UNLOCKED | DRM_RENDER_ALLOW),
+	DRM_IOCTL_DEF_DRV(XENDRM_CREATE_DUMB, xendrmmap_create_dumb_ioctl,
+		DRM_CONTROL_ALLOW | DRM_UNLOCKED),
 };
 
 static const struct file_operations xendrmmap_fops = {
@@ -192,9 +270,9 @@ static const struct file_operations xendrmmap_fops = {
 
 static struct drm_driver xendrmmap_driver = {
 	.driver_features           = DRIVER_GEM | DRIVER_PRIME,
-	.prime_fd_to_handle        = drm_gem_prime_fd_to_handle,
-	.gem_prime_import          = drm_gem_prime_import,
-	.gem_prime_import_sg_table = xendrmmap_gem_prime_import_sg_table,
+	.prime_handle_to_fd        = drm_gem_prime_handle_to_fd,
+	.gem_prime_export          = drm_gem_prime_export,
+	.gem_prime_get_sg_table    = xendrmmap_gem_prime_get_sg_table,
 	.gem_close_object          = xendrmmap_gem_close_object,
 	.gem_free_object_unlocked  = xendrmmap_gem_free_object,
 	.fops                      = &xendrmmap_fops,

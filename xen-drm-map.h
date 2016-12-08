@@ -28,21 +28,21 @@
  * [0x40, 0xa0) (a0 is excluded). The numbers below are defined as offset
  * against DRM_COMMAND_BASE and should be between [0x0, 0x60).
  */
-#define DRM_XENDRM_MAP	0x00
+#define DRM_XENDRM_CREATE_DUMB	0x00
 
 /* XXX: keep this structure properly aligned/padded */
-struct xendrmmap_ioctl_map {
-	uint32_t handle;
+struct xendrmmap_ioctl_create_dumb {
 	/* Xen */
 	uint32_t num_grefs;
-	uint64_t otherend_id;
 	/* FIXME: user-space uses uint32_t instead of grant_ref_t
 	 * for mapping
 	 */
 	uint32_t *grefs;
+	uint64_t otherend_id;
+	struct drm_mode_create_dumb dumb;
 };
 
-#define DRM_IOCTL_XENDRM_MAP	DRM_IOW(DRM_COMMAND_BASE + DRM_XENDRM_MAP, \
-	struct xendrmmap_ioctl_map)
+#define DRM_IOCTL_XENDRM_CREATE_DUMB	DRM_IOW(DRM_COMMAND_BASE + \
+	DRM_XENDRM_CREATE_DUMB, struct xendrmmap_ioctl_create_dumb)
 
 #endif /* __XEN_DRM_MAP_H*/
