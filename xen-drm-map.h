@@ -31,7 +31,7 @@
 #define DRM_XENDRM_MAP	0x00
 
 struct xendrmmap_ioctl_map {
-	uint32_t fd;
+	uint32_t handle;
 };
 
 #define DRM_IOCTL_XENDRM_MAP	DRM_IOW(DRM_COMMAND_BASE + DRM_XENDRM_MAP, \

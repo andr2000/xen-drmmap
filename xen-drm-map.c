@@ -30,13 +30,6 @@ struct xendrmmap_info {
 	struct drm_device *drm_dev;
 };
 
-static const struct file_operations xendrm_fops = {
-	.owner          = THIS_MODULE,
-	.open           = drm_open,
-	.release        = drm_release,
-	.unlocked_ioctl = drm_ioctl,
-};
-
 static int memset_page(void *addr, int color)
 {
 	if (!addr)
@@ -45,29 +38,41 @@ static int memset_page(void *addr, int color)
 	return 0;
 }
 
+struct xendrmmap_gem_object {
+	struct drm_gem_object base;
+	struct sg_table *sgt;
+};
+
+static inline struct xendrmmap_gem_object *
+to_xendrmmap_gem_obj(struct drm_gem_object *gem_obj)
+{
+	return container_of(gem_obj, struct xendrmmap_gem_object, base);
+}
+
 static int xendrmmap_ioctl_map(struct drm_device *dev, void *data,
 	struct drm_file *file_priv)
 {
 	struct xendrmmap_ioctl_map *m = (struct xendrmmap_ioctl_map *)data;
-
-	DRM_DEBUG("m %p\n", m);
-	if (!m)
-		return -EINVAL;
-	DRM_DEBUG("Prime fd %u\n", m->fd);
-	return 0;
-}
-
-struct drm_gem_object *xendrmmap_gem_prime_import_sg_table(
-	struct drm_device *dev, struct dma_buf_attachment *attach,
-	struct sg_table *sgt)
-{
+	struct xendrmmap_gem_object *xendrmmap_obj;
+	struct drm_gem_object *gem_obj;
 	struct sg_page_iter piter;
 	int i;
 
-	DRM_DEBUG("Number of segments in the sg table: %d, is contiguous %d\n",
-		sgt->nents, sgt->nents == 1);
-
-	for_each_sg_page(sgt->sgl, &piter, sgt->nents, 0) {
+	DRM_DEBUG("++++++++++++ m %p\n", m);
+	if (!m)
+		return -EINVAL;
+	gem_obj = drm_gem_object_lookup(file_priv, m->handle);
+	DRM_DEBUG("++++++++++++ Prime handle %u gem_obj %p\n",
+		m->handle, gem_obj);
+	if (!gem_obj)
+		return -EINVAL;
+	drm_gem_object_unreference_unlocked(gem_obj);
+	xendrmmap_obj = to_xendrmmap_gem_obj(gem_obj);
+	DRM_DEBUG("++++++++++++ Mapping GEM object: sgt %p\n",
+		xendrmmap_obj->sgt);
+	i = 0;
+	for_each_sg_page(xendrmmap_obj->sgt->sgl, &piter,
+			xendrmmap_obj->sgt->nents, 0) {
 		struct page *page;
 		dma_addr_t dma_addr;
 
@@ -76,17 +81,83 @@ struct drm_gem_object *xendrmmap_gem_prime_import_sg_table(
 		memset_page(page_to_virt(page), i);
 		i++;
 	}
-	return NULL;
+	return 0;
 }
 
-void xendrmmap_gem_close_object(struct drm_gem_object *gem_obj, struct drm_file *file_priv)
+static struct xendrmmap_gem_object *xendrmmap_obj_create(
+	struct drm_device *drm, size_t size)
 {
-	/* unmap here */
+	struct xendrmmap_gem_object *xendrmmap_obj;
+	int ret;
+
+	xendrmmap_obj = kzalloc(sizeof(*xendrmmap_obj), GFP_KERNEL);
+	if (!xendrmmap_obj)
+		return ERR_PTR(-ENOMEM);
+	ret = drm_gem_object_init(drm, &xendrmmap_obj->base, size);
+	if (ret < 0) {
+		DRM_DEBUG("++++++++++++ Failed to initialize GEM, ret %d\n", ret);
+		goto error;
+	}
+	return xendrmmap_obj;
+
+error:
+	kfree(xendrmmap_obj);
+	return ERR_PTR(ret);
+}
+
+static struct drm_gem_object *xendrmmap_gem_prime_import_sg_table(
+	struct drm_device *dev, struct dma_buf_attachment *attach,
+	struct sg_table *sgt)
+{
+	struct xendrmmap_gem_object *xendrmmap_obj;
+
+	DRM_DEBUG("++++++++++++ Number of segments in the sg table: %d, size %zu at %p\n",
+		sgt->nents, attach->dmabuf->size, sgt);
+	/* Create a Xen GEM buffer. */
+	xendrmmap_obj = xendrmmap_obj_create(dev, attach->dmabuf->size);
+	if (IS_ERR(xendrmmap_obj))
+		return ERR_CAST(xendrmmap_obj);
+
+	xendrmmap_obj->sgt = sgt;
+	DRM_DEBUG("++++++++++++ Done importing\n");
+	return &xendrmmap_obj->base;
+}
+
+static void xendrmmap_gem_close_object(struct drm_gem_object *gem_obj,
+	struct drm_file *file_priv)
+{
+	struct xendrmmap_gem_object *xendrmmap_obj =
+		to_xendrmmap_gem_obj(gem_obj);
+
+	DRM_DEBUG("++++++++++++ Closing GEM object: sgt %p\n",
+		xendrmmap_obj->sgt);
+	/* TODO: unmap here */
+}
+
+static void xendrmmap_gem_free_object(struct drm_gem_object *gem_obj)
+{
+	struct xendrmmap_gem_object *xendrmmap_obj =
+		to_xendrmmap_gem_obj(gem_obj);
+
+	DRM_DEBUG("++++++++++++ Freeing GEM object: sgt %p\n",
+		xendrmmap_obj->sgt);
+
+	if (gem_obj->import_attach)
+		drm_prime_gem_destroy(gem_obj, xendrmmap_obj->sgt);
+	drm_gem_object_release(gem_obj);
+	kfree(xendrmmap_obj);
 }
 
 static const struct drm_ioctl_desc xendrmmap_ioctls[] = {
 	DRM_IOCTL_DEF_DRV(XENDRM_MAP, xendrmmap_ioctl_map, DRM_AUTH |
 		DRM_UNLOCKED | DRM_RENDER_ALLOW),
+};
+
+static const struct file_operations xendrmmap_fops = {
+	.owner          = THIS_MODULE,
+	.open           = drm_open,
+	.release        = drm_release,
+	.unlocked_ioctl = drm_ioctl,
 };
 
 static struct drm_driver xendrmmap_driver = {
@@ -95,7 +166,8 @@ static struct drm_driver xendrmmap_driver = {
 	.gem_prime_import          = drm_gem_prime_import,
 	.gem_prime_import_sg_table = xendrmmap_gem_prime_import_sg_table,
 	.gem_close_object          = xendrmmap_gem_close_object,
-	.fops                      = &xendrm_fops,
+	.gem_free_object_unlocked  = xendrmmap_gem_free_object,
+	.fops                      = &xendrmmap_fops,
 	.ioctls                    = xendrmmap_ioctls,
 	.num_ioctls                = ARRAY_SIZE(xendrmmap_ioctls),
 	.name                      = XENDRMMAP_DRIVER_NAME,
