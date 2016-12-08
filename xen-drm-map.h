@@ -28,20 +28,13 @@
  * [0x40, 0xa0) (a0 is excluded). The numbers below are defined as offset
   * against DRM_COMMAND_BASE and should be between [0x0, 0x60).
   */
-#define DRM_XENDRM_MAP		0x00
-#define DRM_XENXEN_UNMAP	0x01
+#define DRM_XENDRM_MAP	0x00
 
 struct xendrmmap_ioctl_map {
 	uint32_t fd;
 };
 
-struct xendrmmap_ioctl_unmap {
-	uint32_t fd;
-};
-
 #define DRM_IOCTL_XENDRM_MAP	DRM_IOW(DRM_COMMAND_BASE + DRM_XENDRM_MAP, \
 	struct xendrmmap_ioctl_map)
-#define DRM_IOCTL_XENDRM_UNMAP	DRM_IOW(DRM_COMMAND_BASE + DRM_XENXEN_UNMAP, \
-	struct xendrmmap_ioctl_unmap)
 
 #endif /* __XEN_DRM_MAP_H*/
