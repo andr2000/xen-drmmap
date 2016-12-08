@@ -188,7 +188,7 @@ static int xendrm_do_dumb_create(struct drm_device *dev, void *data,
 		ret = -ENOMEM;
 		goto fail;
 	}
-	if (copy_from_user(xen_obj->dumb_obj.grefs, args->grefs, sz) != sz) {
+	if (copy_from_user(xen_obj->dumb_obj.grefs, args->grefs, sz)) {
 		ret = -EINVAL;
 		goto fail;
 	}
