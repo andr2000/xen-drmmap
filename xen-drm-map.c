@@ -35,6 +35,7 @@ struct xendrmmap_info {
 struct xendrmmap_gem_object {
 	struct drm_gem_object base;
 	struct page **pages;
+	bool is_contiguos;
 	struct xendrmmap_ioctl_create_dumb dumb_obj;
 };
 
@@ -246,12 +247,23 @@ static int xendrmmap_create_dumb_ioctl(struct drm_device *dev,
 	return xendrm_do_dumb_create(dev, data, file_priv);
 }
 
+static struct sg_table *xendrmmap_gem_prime_get_sg_table_cont(
+	struct xendrmmap_gem_object *xen_obj)
+{
+	return NULL;
+}
+
 struct sg_table *xendrmmap_gem_prime_get_sg_table(
 	struct drm_gem_object *gem_obj)
 {
 	struct xendrmmap_gem_object *xen_obj = to_xendrmmap_gem_obj(gem_obj);
 
 	DRM_DEBUG("++++++++++++ Exporting sgt\n");
+	/* FIXME: drivers relying on CMA will
+	 * not accept the buffer otherwise
+	 */
+	if (xen_obj->is_contiguos)
+		return xendrmmap_gem_prime_get_sg_table_cont(xen_obj);
 	return drm_prime_pages_to_sg(xen_obj->pages,
 		xen_obj->dumb_obj.num_grefs);
 }
