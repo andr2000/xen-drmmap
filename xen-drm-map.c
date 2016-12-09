@@ -39,8 +39,8 @@ struct xen_gem_object {
 	int size;
 	/* these are pages from Xen balloon */
 	struct page **pages;
-	/* and their map grant references */
-	struct gnttab_map_grant_ref *map_ref;
+	/* and their map grant handles */
+	grant_handle_t *handles;
 	/* Xen */
 	uint32_t num_grefs;
 	grant_ref_t *grefs;
@@ -67,9 +67,10 @@ to_xen_gem_obj(struct drm_gem_object *gem_obj)
 
 static int xen_do_map(struct xen_gem_object *xen_obj)
 {
+	struct gnttab_map_grant_ref *map_ops = NULL;
 	int ret, i, size;
 
-	if (xen_obj->pages || xen_obj->map_ref) {
+	if (xen_obj->pages) {
 		DRM_ERROR("Mapping already mapped pages?\n");
 		return -EINVAL;
 	}
@@ -80,8 +81,13 @@ static int xen_do_map(struct xen_gem_object *xen_obj)
 		ret = -ENOMEM;
 		goto fail;
 	}
-	xen_obj->map_ref = kzalloc(size, GFP_KERNEL);
-	if (!xen_obj->map_ref) {
+	xen_obj->handles = kzalloc(size, GFP_KERNEL);
+	if (!xen_obj->handles) {
+		ret = -ENOMEM;
+		goto fail;
+	}
+	map_ops = kzalloc(size, GFP_KERNEL);
+	if (!map_ops) {
 		ret = -ENOMEM;
 		goto fail;
 	}
@@ -98,59 +104,73 @@ static int xen_do_map(struct xen_gem_object *xen_obj)
 		phys_addr_t addr;
 
 		addr = xen_page_to_vaddr(xen_obj->pages[i]);
-		gnttab_set_map_op(&xen_obj->map_ref[i], addr, GNTMAP_host_map,
+		gnttab_set_map_op(&map_ops[i], addr, GNTMAP_host_map,
 			xen_obj->grefs[i], xen_obj->otherend_id);
 	}
 	DRM_DEBUG("++++++++++++ Mapping refs\n");
-	ret = gnttab_map_refs(xen_obj->map_ref, NULL, xen_obj->pages,
+	ret = gnttab_map_refs(map_ops, NULL, xen_obj->pages,
 		xen_obj->num_grefs);
 	BUG_ON(ret);
-	/* sanity check */
 	for (i = 0; i < xen_obj->num_grefs; i++) {
-		if (unlikely(xen_obj->map_ref[i].status != GNTST_okay)) {
+		xen_obj->handles[i] = map_ops[i].handle;
+		if (unlikely(map_ops[i].status != GNTST_okay)) {
 			DRM_ERROR("Failed to set map op for page %d, ref %d: %s (%d)\n",
 				i, xen_obj->grefs[i],
-				xen_gnttab_err_to_string(xen_obj->map_ref[i].status),
-				xen_obj->map_ref[i].status);
+				xen_gnttab_err_to_string(map_ops[i].status),
+				map_ops[i].status);
 		}
 	}
+	kfree(map_ops);
 	return 0;
 fail:
 	if (xen_obj->pages)
 		kfree(xen_obj->pages);
 	xen_obj->pages = NULL;
-	if (xen_obj->map_ref)
-		kfree(xen_obj->map_ref);
-	xen_obj->map_ref = NULL;
+	if (xen_obj->handles)
+		kfree(xen_obj->handles);
+	xen_obj->handles = NULL;
+	if (map_ops)
+		kfree(map_ops);
 	return ret;
 
 }
 
 static int xen_do_unmap(struct xen_gem_object *xen_obj)
 {
-	int ret;
+	struct gnttab_unmap_grant_ref *unmap_ops;
+	struct gntab_unmap_queue_data unmap_data;
+	int i, size;
 
-	if (!xen_obj->pages || !xen_obj->map_ref)
+	if (!xen_obj->pages || !xen_obj->handles)
 		return 0;
-#if 0
-	struct sg_page_iter piter;
 
-	for_each_sg_page(xen_obj->sgt->sgl, &piter,
-			xen_obj->sgt->nents, 0) {
-		struct page *page;
-		dma_addr_t dma_addr;
+	size = xen_obj->num_grefs * sizeof(struct page *);
+	unmap_ops = kzalloc(size, GFP_KERNEL);
+	if (!unmap_ops)
+		return -ENOMEM;
+	DRM_DEBUG("++++++++++++ Setting GNTMAP_host_map\n");
+	for (i = 0; i < xen_obj->num_grefs; i++) {
+		phys_addr_t addr;
 
-		page = sg_page_iter_page(&piter);
-		dma_addr = sg_page_iter_dma_address(&piter);
+		addr = xen_page_to_vaddr(xen_obj->pages[i]);
+		gnttab_set_unmap_op(&unmap_ops[i], addr, GNTMAP_host_map,
+			xen_obj->handles[i]);
 	}
-#endif
+	DRM_DEBUG("++++++++++++ Unmapping refs\n");
+	unmap_data.pages = xen_obj->pages;
+	unmap_data.unmap_ops = unmap_ops;
+	unmap_data.kunmap_ops = NULL;
+	unmap_data.count = xen_obj->num_grefs;
+	BUG_ON(gnttab_unmap_refs_sync(&unmap_data));
+
 	DRM_DEBUG("++++++++++++ Freeing %d ballooned pages\n",
 		xen_obj->num_grefs);
 	free_xenballooned_pages(xen_obj->num_grefs, xen_obj->pages);
 	kfree(xen_obj->pages);
 	xen_obj->pages = NULL;
-	kfree(xen_obj->map_ref);
-	xen_obj->map_ref = NULL;
+	kfree(xen_obj->handles);
+	xen_obj->handles = NULL;
+	kfree(unmap_ops);
 	return 0;
 }
 
