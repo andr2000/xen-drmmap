@@ -22,6 +22,7 @@
 #include <linux/dma-buf.h>
 #include <linux/platform_device.h>
 
+#include <xen/balloon.h>
 #include <xen/grant_table.h>
 
 #include "xen-drm-map.h"
@@ -36,12 +37,25 @@ struct xen_gem_object {
 	struct drm_gem_object base;
 	uint32_t handle;
 	int size;
+	/* these are pages from Xen balloon */
 	struct page **pages;
+	/* and their map grant references */
+	struct gnttab_map_grant_ref *map_ref;
 	/* Xen */
 	uint32_t num_grefs;
 	grant_ref_t *grefs;
 	int otherend_id;
 };
+
+static const char *gnttabop_error_msgs[] = GNTTABOP_error_msgs;
+
+static const char *xen_gnttab_err_to_string(int16_t status)
+{
+	status = -status;
+	if (status < 0 || status >= ARRAY_SIZE(gnttabop_error_msgs))
+		return "bad status code";
+	return gnttabop_error_msgs[status];
+}
 
 static inline struct xen_gem_object *
 to_xen_gem_obj(struct drm_gem_object *gem_obj)
@@ -49,25 +63,75 @@ to_xen_gem_obj(struct drm_gem_object *gem_obj)
 	return container_of(gem_obj, struct xen_gem_object, base);
 }
 
+#define xen_page_to_vaddr(page) ((phys_addr_t)pfn_to_kaddr(page_to_pfn(page)))
+
 static int xen_do_map(struct xen_gem_object *xen_obj)
 {
-#if 0
-	struct sg_page_iter piter;
+	int ret, i, size;
 
-	for_each_sg_page(xen_obj->sgt->sgl, &piter,
-			xen_obj->sgt->nents, 0) {
-		struct page *page;
-		dma_addr_t dma_addr;
-
-		page = sg_page_iter_page(&piter);
-		dma_addr = sg_page_iter_dma_address(&piter);
+	if (xen_obj->pages || xen_obj->map_ref) {
+		DRM_ERROR("Mapping already mapped pages?\n");
+		return -EINVAL;
 	}
-#endif
+	DRM_DEBUG("++++++++++++ Allocating buffers\n");
+	size = xen_obj->num_grefs * sizeof(struct page *);
+	xen_obj->pages = kzalloc(size, GFP_KERNEL);
+	if (!xen_obj->pages) {
+		ret = -ENOMEM;
+		goto fail;
+	}
+	xen_obj->map_ref = kzalloc(size, GFP_KERNEL);
+	if (!xen_obj->map_ref) {
+		ret = -ENOMEM;
+		goto fail;
+	}
+	DRM_DEBUG("++++++++++++ Allocating %d ballooned pages\n",
+		xen_obj->num_grefs);
+	ret = alloc_xenballooned_pages(xen_obj->num_grefs, xen_obj->pages);
+	if (ret < 0) {
+		DRM_ERROR("++++++++++++ Cannot allocate %d ballooned pages, ret %d\n",
+			xen_obj->num_grefs, ret);
+		goto fail;
+	}
+	DRM_DEBUG("++++++++++++ Setting GNTMAP_host_map\n");
+	for (i = 0; i < xen_obj->num_grefs; i++) {
+		phys_addr_t addr;
+
+		addr = xen_page_to_vaddr(xen_obj->pages[i]);
+		gnttab_set_map_op(&xen_obj->map_ref[i], addr, GNTMAP_host_map,
+			xen_obj->grefs[i], xen_obj->otherend_id);
+	}
+	DRM_DEBUG("++++++++++++ Mapping refs\n");
+	ret = gnttab_map_refs(xen_obj->map_ref, NULL, xen_obj->pages,
+		xen_obj->num_grefs);
+	BUG_ON(ret);
+	/* sanity check */
+	for (i = 0; i < xen_obj->num_grefs; i++) {
+		if (unlikely(xen_obj->map_ref[i].status != GNTST_okay)) {
+			DRM_ERROR("Failed to set map op for page %d, ref %d: %s (%d)\n",
+				i, xen_obj->grefs[i],
+				xen_gnttab_err_to_string(xen_obj->map_ref[i].status),
+				xen_obj->map_ref[i].status);
+		}
+	}
 	return 0;
+fail:
+	if (xen_obj->pages)
+		kfree(xen_obj->pages);
+	xen_obj->pages = NULL;
+	if (xen_obj->map_ref)
+		kfree(xen_obj->map_ref);
+	xen_obj->map_ref = NULL;
+	return ret;
+
 }
 
 static int xen_do_unmap(struct xen_gem_object *xen_obj)
 {
+	int ret;
+
+	if (!xen_obj->pages || !xen_obj->map_ref)
+		return 0;
 #if 0
 	struct sg_page_iter piter;
 
@@ -80,6 +144,13 @@ static int xen_do_unmap(struct xen_gem_object *xen_obj)
 		dma_addr = sg_page_iter_dma_address(&piter);
 	}
 #endif
+	DRM_DEBUG("++++++++++++ Freeing %d ballooned pages\n",
+		xen_obj->num_grefs);
+	free_xenballooned_pages(xen_obj->num_grefs, xen_obj->pages);
+	kfree(xen_obj->pages);
+	xen_obj->pages = NULL;
+	kfree(xen_obj->map_ref);
+	xen_obj->map_ref = NULL;
 	return 0;
 }
 
@@ -101,8 +172,6 @@ static void xen_gem_free_object(struct drm_gem_object *gem_obj)
 	drm_gem_object_release(gem_obj);
 	if (xen_obj->grefs)
 		kfree(xen_obj->grefs);
-	if (xen_obj->pages)
-		kfree(xen_obj->pages);
 	kfree(xen_obj);
 }
 
@@ -175,19 +244,13 @@ static int xendrm_do_dumb_create(struct drm_device *dev,
 	xen_obj->size = req->dumb.size;
 
 	sz = xen_obj->num_grefs * sizeof(grant_ref_t);
-	xen_obj->grefs = kmalloc(sz, GFP_KERNEL);
+	xen_obj->grefs = kzalloc(sz, GFP_KERNEL);
 	if (!xen_obj->grefs) {
 		ret = -ENOMEM;
 		goto fail;
 	}
 	if (copy_from_user(xen_obj->grefs, req->grefs, sz)) {
 		ret = -EINVAL;
-		goto fail;
-	}
-	sz = xen_obj->num_grefs * sizeof(struct page *);
-	xen_obj->pages = kmalloc(sz, GFP_KERNEL);
-	if (!xen_obj->pages) {
-		ret = -ENOMEM;
 		goto fail;
 	}
 	ret = xen_do_map(xen_obj);
@@ -204,9 +267,6 @@ fail:
 	if (xen_obj->grefs)
 		kfree(xen_obj->grefs);
 	xen_obj->grefs = NULL;
-	if (xen_obj->pages)
-		kfree(xen_obj->pages);
-	xen_obj->pages = NULL;
 	return ret;
 }
 
