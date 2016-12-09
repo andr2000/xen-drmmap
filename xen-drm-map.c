@@ -319,7 +319,7 @@ static int xen_create_dumb_ioctl(struct drm_device *dev,
 
 	/* this are the output parameters */
 	args->pitch = DIV_ROUND_UP(args->width * args->bpp, 8);
-	args->size = args->pitch * args->height;
+	args->size = round_up(args->pitch * args->height, PAGE_SIZE);
 	args->handle = 0;
 	if (req->num_grefs < DIV_ROUND_UP(args->size, PAGE_SIZE)) {
 		DRM_ERROR("++++++++++++ Provided %d pages, need %d\n",
@@ -418,10 +418,8 @@ static int xen_probe(struct platform_device *pdev)
 		xen_driver.minor, xen_driver.patchlevel,
 		xen_driver.date, drm_dev->primary->index);
 	return 0;
+
 fail:
-	/* TODO: remove doesn't check if any part of the driver was created
-	 * this needs to be fixed
-	 */
 	xen_remove(pdev);
 	return ret;
 }
