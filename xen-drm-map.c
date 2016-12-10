@@ -99,12 +99,15 @@ static int xen_do_map(struct xen_gem_object *xen_obj)
 			xen_obj->num_pages, ret);
 		goto fail;
 	}
-	DRM_DEBUG("++++++++++++ Setting GNTMAP_host_map\n");
+	DRM_DEBUG("++++++++++++ Setting GNTMAP_host_map|GNTMAP_device_map\n");
 	for (i = 0; i < xen_obj->num_pages; i++) {
 		phys_addr_t addr;
 
+		/* Map the grant entry for access by I/O devices. */
+		/* Map the grant entry for access by host CPUs. */
 		addr = xen_page_to_vaddr(xen_obj->pages[i]);
-		gnttab_set_map_op(&map_ops[i], addr, GNTMAP_host_map,
+		gnttab_set_map_op(&map_ops[i], addr,
+			GNTMAP_host_map | GNTMAP_device_map,
 			xen_obj->grefs[i], xen_obj->otherend_id);
 	}
 	DRM_DEBUG("++++++++++++ Mapping refs\n");
@@ -138,7 +141,6 @@ fail:
 static int xen_do_unmap(struct xen_gem_object *xen_obj)
 {
 	struct gnttab_unmap_grant_ref *unmap_ops;
-	struct gntab_unmap_queue_data unmap_data;
 	int i, size;
 
 	if (!xen_obj->pages || !xen_obj->map_handles)
@@ -148,20 +150,24 @@ static int xen_do_unmap(struct xen_gem_object *xen_obj)
 	unmap_ops = kzalloc(size, GFP_KERNEL);
 	if (!unmap_ops)
 		return -ENOMEM;
-	DRM_DEBUG("++++++++++++ Setting GNTMAP_host_map\n");
+	DRM_DEBUG("++++++++++++ Setting GNTMAP_host_map|GNTMAP_device_map\n");
 	for (i = 0; i < xen_obj->num_pages; i++) {
 		phys_addr_t addr;
 
+		/* Map the grant entry for access by I/O devices.
+		 * Map the grant entry for access by host CPUs.
+		 * If <host_addr> or <dev_bus_addr> is zero, that
+		 * field is ignored. If non-zero, they must refer to
+		 * a device/host mapping that is tracked by <handle>
+		 */
 		addr = xen_page_to_vaddr(xen_obj->pages[i]);
-		gnttab_set_unmap_op(&unmap_ops[i], addr, GNTMAP_host_map,
+		gnttab_set_unmap_op(&unmap_ops[i], addr,
+			GNTMAP_host_map | GNTMAP_device_map,
 			xen_obj->map_handles[i]);
 	}
 	DRM_DEBUG("++++++++++++ Unmapping refs\n");
-	unmap_data.pages = xen_obj->pages;
-	unmap_data.unmap_ops = unmap_ops;
-	unmap_data.kunmap_ops = NULL;
-	unmap_data.count = xen_obj->num_pages;
-	BUG_ON(gnttab_unmap_refs_sync(&unmap_data));
+	BUG_ON(gnttab_unmap_refs(unmap_ops, NULL, xen_obj->pages,
+		xen_obj->num_pages));
 
 	DRM_DEBUG("++++++++++++ Freeing %d ballooned pages\n",
 		xen_obj->num_pages);
