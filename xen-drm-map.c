@@ -59,6 +59,8 @@ static struct xen_gem_object *xen_find_obj(struct xen_info *drv_info,
 {
 	struct list_head *pos, *q;
 
+	if (!drv_info->dumb_list)
+		return NULL;
 	list_for_each_safe(pos, q, &drv_info->dumb_list->list) {
 		struct xen_gem_object *gem;
 
@@ -97,6 +99,8 @@ static int xen_balloon_out_pages(int num_pages, struct page **pages)
 		.domid        = DOMID_SELF
 	};
 
+	DRM_ERROR("Ballooning out %d pages", num_pages);
+
 	frame_list = kcalloc(num_pages, sizeof(*frame_list), GFP_KERNEL);
 	if (!frame_list)
 		return -ENOMEM;
@@ -112,13 +116,15 @@ again:
 	reservation.nr_extents = num_pages;
 	/* rc will hold number of pages processed */
 	ret = HYPERVISOR_memory_op(XENMEM_populate_physmap, &reservation);
-	WARN_ON(ret != num_pages);
-	if (ret != num_pages) {
+	if (ret <= 0) {
+		DRM_ERROR("Failed to balloon out %d pages, retrying", num_pages);
 		if (--tries_left)
 			goto again;
+		WARN_ON(ret != num_pages);
 		ret = -EFAULT;
 		goto out;
 	} else {
+		DRM_ERROR("Ballooned out %d pages", ret);
 		ret = 0;
 	}
 
@@ -134,7 +140,7 @@ again:
 		if (!xen_feature(XENFEAT_auto_translated_physmap)) {
 			unsigned long pfn = page_to_pfn(page);
 
-			set_phys_to_machine(pfn, frame_list[i]);
+			xen_set_phys_to_machine(pfn, frame_list[i]);
 
 			/* Link back into the page tables if not highmem. */
 			if (!PageHighMem(page)) {
@@ -223,15 +229,19 @@ static int xen_do_map(struct xen_gem_object *xen_obj)
 			xen_obj->grefs[i], xen_obj->otherend_id);
 		i++;
 	}
-	DRM_DEBUG("++++++++++++ Ballooning out %d pages\n", i);
-	ret = xen_balloon_out(i, pages);
+	DRM_DEBUG("++++++++++++ Ballooning out %d pages\n",
+		xen_obj->num_pages);
+	ret = xen_balloon_out(xen_obj->num_pages, pages);
 	if (ret < 0) {
-		DRM_ERROR("Failed to balloon out %d pages\n", i);
+		DRM_ERROR("Failed to balloon out %d pages\n",
+			xen_obj->num_pages);
 		ret = -EFAULT;
 		goto fail;
 	}
-	DRM_DEBUG("++++++++++++ Mapping refs for %d pages\n", i);
-	ret = gnttab_map_refs(map_ops, NULL, pages, xen_obj->num_pages);
+	DRM_DEBUG("++++++++++++ Mapping refs for %d pages\n",
+		xen_obj->num_pages);
+	ret = gnttab_map_refs(map_ops, NULL, pages,
+		xen_obj->num_pages);
 	BUG_ON(ret);
 	for (i = 0; i < xen_obj->num_pages; i++) {
 		xen_obj->map_handles[i] = map_ops[i].handle;
@@ -343,9 +353,8 @@ static void xen_gem_close_object(struct drm_gem_object *gem_obj,
 	DRM_DEBUG("++++++++++++ Closing GEM object\n");
 	mutex_lock(&xen_info.mutex);
 	xen_obj = xen_find_obj(&xen_info, cma_obj);
-	if (xen_obj) {
-		DRM_ERROR("++++++++++++ Cannot find Xen object, handle %d\n",
-			xen_obj->dumb_handle);
+	if (!xen_obj) {
+		DRM_ERROR("++++++++++++ Cannot find Xen object, handle\n");
 		mutex_unlock(&xen_info.mutex);
 		return;
 	}
@@ -360,12 +369,12 @@ static void xen_gem_free_object(struct drm_gem_object *gem_obj)
 	struct xen_gem_object *xen_obj;
 
 
+	cma_obj = to_drm_gem_cma_obj(gem_obj);
 	DRM_DEBUG("++++++++++++ Freeing GEM object\n");
 	mutex_lock(&drv_info->mutex);
 	xen_obj = xen_find_obj(drv_info, cma_obj);
-	if (xen_obj) {
-		DRM_ERROR("++++++++++++ Cannot find Xen object, handle %d\n",
-			xen_obj->dumb_handle);
+	if (!xen_obj) {
+		DRM_ERROR("++++++++++++ Cannot find Xen object\n");
 		mutex_unlock(&drv_info->mutex);
 		return;
 	}
@@ -556,39 +565,41 @@ static struct platform_driver xen_ddrv_info = {
 	},
 };
 
+struct platform_device_info xen_ddrv_platform_info = {
+	.name = XENDRMMAP_DRIVER_NAME,
+	.id = 0,
+	.num_res = 0,
+	.dma_mask = DMA_BIT_MASK(32),
+};
+
 static struct platform_device *xen_pdev;
 
 static int __init xen_init(void)
 {
 	int ret;
 
-	xen_pdev = platform_device_alloc(XENDRMMAP_DRIVER_NAME, -1);
-	if (!xen_pdev) {
-		LOG0("Failed to allocate " XENDRMMAP_DRIVER_NAME \
-			" device");
-		return -ENODEV;
-	}
-	ret = platform_device_add(xen_pdev);
-	if (ret != 0) {
-		LOG0("Failed to register " XENDRMMAP_DRIVER_NAME \
-			" device: %d\n", ret);
-		platform_device_put(xen_pdev);
-		return -ENODEV;
-	}
 	ret = platform_driver_register(&xen_ddrv_info);
 	if (ret != 0) {
 		LOG0("Failed to register " XENDRMMAP_DRIVER_NAME \
 			" driver: %d\n", ret);
 		platform_device_unregister(xen_pdev);
+		return ret;
+	}
+	xen_pdev = platform_device_register_full(&xen_ddrv_platform_info);
+	if (!xen_pdev) {
+		LOG0("Failed to register " XENDRMMAP_DRIVER_NAME \
+			" device: %d\n", ret);
+		platform_device_unregister(xen_pdev);
+		return -ENODEV;
 	}
 	return 0;
 }
 
 static void __exit xen_cleanup(void)
 {
-	platform_driver_unregister(&xen_ddrv_info);
 	if (xen_pdev)
 		platform_device_unregister(xen_pdev);
+	platform_driver_unregister(&xen_ddrv_info);
 }
 
 module_init(xen_init);
