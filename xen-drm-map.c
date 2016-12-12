@@ -39,7 +39,6 @@ struct xen_gem_object {
 	int size;
 	/* these are pages from Xen balloon */
 	struct page **pages;
-	struct page **mapped_pages;
 	/* and their map grant handles */
 	grant_handle_t *map_handles;
 	/* Xen */
@@ -82,12 +81,6 @@ static int xen_do_map(struct xen_gem_object *xen_obj)
 		ret = -ENOMEM;
 		goto fail;
 	}
-	size = xen_obj->num_pages * sizeof(*(xen_obj->mapped_pages));
-	xen_obj->mapped_pages = kzalloc(size, GFP_KERNEL);
-	if (!xen_obj->mapped_pages) {
-		ret = -ENOMEM;
-		goto fail;
-	}
 	size = xen_obj->num_pages * sizeof(*(xen_obj->map_handles));
 	xen_obj->map_handles = kzalloc(size, GFP_KERNEL);
 	if (!xen_obj->map_handles) {
@@ -125,7 +118,6 @@ static int xen_do_map(struct xen_gem_object *xen_obj)
 	BUG_ON(ret);
 	for (i = 0; i < xen_obj->num_pages; i++) {
 		xen_obj->map_handles[i] = map_ops[i].handle;
-		xen_obj->mapped_pages[i] = xen_pfn_to_page(map_ops[i].dev_bus_addr);
 		if (unlikely(map_ops[i].status != GNTST_okay)) {
 			DRM_ERROR("Failed to set map op for page %d, ref %d: %s (%d)\n",
 				i, xen_obj->grefs[i],
@@ -139,9 +131,6 @@ fail:
 	if (xen_obj->pages)
 		kfree(xen_obj->pages);
 	xen_obj->pages = NULL;
-	if (xen_obj->mapped_pages)
-		kfree(xen_obj->mapped_pages);
-	xen_obj->mapped_pages = NULL;
 	if (xen_obj->map_handles)
 		kfree(xen_obj->map_handles);
 	xen_obj->map_handles = NULL;
@@ -187,8 +176,6 @@ static int xen_do_unmap(struct xen_gem_object *xen_obj)
 	free_xenballooned_pages(xen_obj->num_pages, xen_obj->pages);
 	kfree(xen_obj->pages);
 	xen_obj->pages = NULL;
-	kfree(xen_obj->mapped_pages);
-	xen_obj->mapped_pages = NULL;
 	kfree(xen_obj->map_handles);
 	xen_obj->map_handles = NULL;
 	kfree(unmap_ops);
