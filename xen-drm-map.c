@@ -269,7 +269,7 @@ static int xendrm_do_dumb_create(struct drm_device *dev,
 	DRM_DEBUG("++++++++++++ Creating DUMB\n");
 	xen_obj->num_pages = req->num_grefs;
 	xen_obj->otherend_id = req->otherend_id;
-	xen_obj->size = req->dumb.size;
+	xen_obj->size = round_up(req->dumb.size, PAGE_SIZE);
 
 	sz = xen_obj->num_pages * sizeof(grant_ref_t);
 	xen_obj->grefs = kzalloc(sz, GFP_KERNEL);
@@ -327,7 +327,7 @@ static int xen_create_dumb_ioctl(struct drm_device *dev,
 
 	/* this are the output parameters */
 	args->pitch = DIV_ROUND_UP(args->width * args->bpp, 8);
-	args->size = round_up(args->pitch * args->height, PAGE_SIZE);
+	args->size = args->pitch * args->height;
 	args->handle = 0;
 	if (req->num_grefs < DIV_ROUND_UP(args->size, PAGE_SIZE)) {
 		DRM_ERROR("++++++++++++ Provided %d pages, need %d\n",
