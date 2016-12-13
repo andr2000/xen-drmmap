@@ -15,9 +15,7 @@
  */
 
 #include <drm/drmP.h>
-
-#include <drm/drm_fb_cma_helper.h>
-#include <drm/drm_gem_cma_helper.h>
+#include <drm/drm_gem.h>
 
 #include <linux/dma-buf.h>
 #include <linux/platform_device.h>
@@ -440,23 +438,23 @@ static struct platform_driver xen_ddrv_info = {
 	},
 };
 
+struct platform_device_info xen_ddrv_platform_info = {
+	.name = XENDRMMAP_DRIVER_NAME,
+	.id = 0,
+	.num_res = 0,
+	.dma_mask = DMA_BIT_MASK(32),
+};
+
 static struct platform_device *xen_pdev;
 
 static int __init xen_init(void)
 {
 	int ret;
 
-	xen_pdev = platform_device_alloc(XENDRMMAP_DRIVER_NAME, -1);
+	xen_pdev = platform_device_register_full(&xen_ddrv_platform_info);
 	if (!xen_pdev) {
-		LOG0("Failed to allocate " XENDRMMAP_DRIVER_NAME \
-			" device");
-		return -ENODEV;
-	}
-	ret = platform_device_add(xen_pdev);
-	if (ret != 0) {
 		LOG0("Failed to register " XENDRMMAP_DRIVER_NAME \
 			" device: %d\n", ret);
-		platform_device_put(xen_pdev);
 		return -ENODEV;
 	}
 	ret = platform_driver_register(&xen_ddrv_info);
@@ -464,15 +462,16 @@ static int __init xen_init(void)
 		LOG0("Failed to register " XENDRMMAP_DRIVER_NAME \
 			" driver: %d\n", ret);
 		platform_device_unregister(xen_pdev);
+		return ret;
 	}
 	return 0;
 }
 
 static void __exit xen_cleanup(void)
 {
-	platform_driver_unregister(&xen_ddrv_info);
 	if (xen_pdev)
 		platform_device_unregister(xen_pdev);
+	platform_driver_unregister(&xen_ddrv_info);
 }
 
 module_init(xen_init);
