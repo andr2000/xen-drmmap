@@ -20,7 +20,9 @@
 #include <linux/dma-buf.h>
 #include <linux/platform_device.h>
 
+#ifdef CONFIG_XEN_HAVE_PVMMU
 #include <xen/balloon.h>
+#endif
 #include <xen/grant_table.h>
 
 #include "xen-drm-map.h"
@@ -61,6 +63,31 @@ to_xen_gem_obj(struct drm_gem_object *gem_obj)
 	return container_of(gem_obj, struct xen_gem_object, base);
 }
 
+#ifdef CONFIG_XEN_HAVE_PVMMU
+/* FIXME: ARM platform has no concept of PVMMU,
+ * so, most probably, drivers for ARM will require CMA
+ */
+#define xen_alloc_ballooned_pages	alloc_xenballooned_pages
+#define xen_free_ballooned_pages	free_xenballooned_pages
+#else
+static int xen_alloc_ballooned_pages(int nr_pages, struct page **pages)
+{
+	return -ENOSYS;
+}
+
+static void xen_free_ballooned_pages(int nr_pages, struct page **pages)
+{
+}
+#endif
+
+static struct xen_balloon_ops {
+	int (*alloc_pages)(int nr_pages, struct page **pages);
+	void (*free_pages)(int nr_pages, struct page **pages);
+} xen_balloon_ops = {
+	.alloc_pages = xen_alloc_ballooned_pages,
+	.free_pages = xen_free_ballooned_pages,
+};
+
 #define xen_page_to_vaddr(page) ((phys_addr_t)pfn_to_kaddr(page_to_xen_pfn(page)))
 
 static int xen_do_map(struct xen_gem_object *xen_obj)
@@ -93,7 +120,7 @@ static int xen_do_map(struct xen_gem_object *xen_obj)
 	}
 	DRM_DEBUG("++++++++++++ Allocating %d ballooned pages\n",
 		xen_obj->num_pages);
-	ret = alloc_xenballooned_pages(xen_obj->num_pages, xen_obj->pages);
+	ret = xen_balloon_ops.alloc_pages(xen_obj->num_pages, xen_obj->pages);
 	if (ret < 0) {
 		DRM_ERROR("++++++++++++ Cannot allocate %d ballooned pages, ret %d\n",
 			xen_obj->num_pages, ret);
@@ -171,7 +198,7 @@ static int xen_do_unmap(struct xen_gem_object *xen_obj)
 
 	DRM_DEBUG("++++++++++++ Freeing %d ballooned pages\n",
 		xen_obj->num_pages);
-	free_xenballooned_pages(xen_obj->num_pages, xen_obj->pages);
+	xen_balloon_ops.free_pages(xen_obj->num_pages, xen_obj->pages);
 	kfree(xen_obj->pages);
 	xen_obj->pages = NULL;
 	kfree(xen_obj->map_handles);
