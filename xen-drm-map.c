@@ -265,15 +265,13 @@ static int xen_do_map(struct xen_gem_object *xen_obj)
 	}
 	kfree(map_ops);
 	return 0;
+
 fail:
-	if (xen_obj->pages)
-		kfree(xen_obj->pages);
+	kfree(xen_obj->pages);
 	xen_obj->pages = NULL;
-	if (xen_obj->map_handles)
-		kfree(xen_obj->map_handles);
+	kfree(xen_obj->map_handles);
 	xen_obj->map_handles = NULL;
-	if (map_ops)
-		kfree(map_ops);
+	kfree(map_ops);
 	return ret;
 
 }
@@ -336,8 +334,7 @@ static void xen_gem_free_object(struct drm_gem_object *gem_obj)
 
 	DRM_DEBUG("++++++++++++ Freeing GEM object\n");
 	drm_gem_object_release(gem_obj);
-	if (xen_obj->grefs)
-		kfree(xen_obj->grefs);
+	kfree(xen_obj->grefs);
 	kfree(xen_obj);
 }
 
@@ -430,8 +427,7 @@ static int xendrm_do_dumb_create(struct drm_device *dev,
 	return 0;
 
 fail:
-	if (xen_obj->grefs)
-		kfree(xen_obj->grefs);
+	kfree(xen_obj->grefs);
 	xen_obj->grefs = NULL;
 	return ret;
 }
