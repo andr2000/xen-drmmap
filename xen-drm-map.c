@@ -324,17 +324,41 @@ static void xen_gem_close_object(struct drm_gem_object *gem_obj,
 {
 	struct xen_gem_object *xen_obj = to_xen_gem_obj(gem_obj);
 
-	DRM_DEBUG("++++++++++++ Closing GEM object\n");
-	xen_do_unmap(xen_obj);
+	/* from drm_prime.c:
+	 * On the export the dma_buf holds a reference to the exporting GEM
+	 * object. It takes this reference in handle_to_fd_ioctl, when it
+	 * first calls .prime_export and stores the exporting GEM object in
+	 * the dma_buf priv. This reference is released when the dma_buf
+	 * object goes away in the driver .release function.
+	 * FIXME: this is too late, as we have to unmap now, so front
+	 * can release granted references
+	 * FIXME: if handle_count is 1 then dma_buf is not in use anymore
+	 * waiting for the driver's .release. Otherwise it is a bug in
+	 * the backend, e.g. the handle was not closed in the driver which
+	 * imported our dma_buf
+	 */
+	mutex_lock(&gem_obj->dev->object_name_lock);
+	DRM_DEBUG("++++++++++++ Closing GEM object handle %d, ref %d handle_count %d\n",
+		xen_obj->dumb_handle, atomic_read(&gem_obj->refcount.refcount),
+		gem_obj->handle_count);
+	WARN_ON(gem_obj->handle_count != 1);
+	if (gem_obj->handle_count == 1) {
+		xen_do_unmap(xen_obj);
+		kfree(xen_obj->grefs);
+		xen_obj->grefs = NULL;
+	}
+	mutex_unlock(&gem_obj->dev->object_name_lock);
 }
 
 static void xen_gem_free_object(struct drm_gem_object *gem_obj)
 {
 	struct xen_gem_object *xen_obj = to_xen_gem_obj(gem_obj);
 
+	/* FIXME: this gets called on driver .release because of
+	 * .handle_to_fd_ioctl + .prime_export
+	 */
 	DRM_DEBUG("++++++++++++ Freeing GEM object\n");
 	drm_gem_object_release(gem_obj);
-	kfree(xen_obj->grefs);
 	kfree(xen_obj);
 }
 
@@ -424,6 +448,8 @@ static int xendrm_do_dumb_create(struct drm_device *dev,
 		goto fail;
 	/* return handle */
 	req->dumb.handle = xen_obj->dumb_handle;
+	DRM_DEBUG("++++++++++++ Create GEM object, ref %d\n",
+		atomic_read(&xen_obj->base.refcount.refcount));
 	return 0;
 
 fail:
