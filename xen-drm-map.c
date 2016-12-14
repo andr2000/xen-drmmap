@@ -369,18 +369,8 @@ static int xen_gem_create_with_handle(
 	struct drm_gem_object *gem_obj;
 	int ret;
 
-	ret = drm_gem_object_init(dev, &xen_obj->base, xen_obj->size);
-	if (ret < 0) {
-		DRM_DEBUG("++++++++++++ Failed to initialize GEM, ret %d\n",
-			ret);
-		return ret;
-	}
+	drm_gem_private_object_init(dev, &xen_obj->base, xen_obj->size);
 	gem_obj = &xen_obj->base;
-	ret = drm_gem_create_mmap_offset(gem_obj);
-	if (ret < 0) {
-		drm_gem_object_release(gem_obj);
-		return ret;
-	}
 	ret = drm_gem_handle_create(file_priv, gem_obj, &xen_obj->dumb_handle);
 	DRM_ERROR("++++++++++++ Handle is %d, ret %d\n", xen_obj->dumb_handle, ret);
 	/* drop reference from allocate - handle holds it now. */
