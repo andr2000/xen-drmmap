@@ -49,6 +49,7 @@ struct xen_gem_object {
 #endif
 	/* and their map grant handles */
 	grant_handle_t *map_handles;
+	uint64_t *dev_bus_addr;
 	/* Xen */
 	uint32_t num_pages;
 	grant_ref_t *grefs;
@@ -225,6 +226,12 @@ static int xen_do_map(struct xen_gem_object *xen_obj)
 		ret = -ENOMEM;
 		goto fail;
 	}
+	size = xen_obj->num_pages * sizeof(*(xen_obj->dev_bus_addr));
+	xen_obj->dev_bus_addr = kzalloc(size, GFP_KERNEL);
+	if (!xen_obj->dev_bus_addr) {
+		ret = -ENOMEM;
+		goto fail;
+	}
 	size = xen_obj->num_pages * sizeof(*map_ops);
 	map_ops = kzalloc(size, GFP_KERNEL);
 	if (!map_ops) {
@@ -256,6 +263,7 @@ static int xen_do_map(struct xen_gem_object *xen_obj)
 	BUG_ON(ret);
 	for (i = 0; i < xen_obj->num_pages; i++) {
 		xen_obj->map_handles[i] = map_ops[i].handle;
+		xen_obj->dev_bus_addr[i] = map_ops[i].dev_bus_addr;
 		if (unlikely(map_ops[i].status != GNTST_okay)) {
 			DRM_ERROR("Failed to set map op for page %d, ref %d: %s (%d)\n",
 				i, xen_obj->grefs[i],
@@ -271,6 +279,8 @@ fail:
 	xen_obj->pages = NULL;
 	kfree(xen_obj->map_handles);
 	xen_obj->map_handles = NULL;
+	kfree(xen_obj->dev_bus_addr);
+	xen_obj->dev_bus_addr = NULL;
 	kfree(map_ops);
 	return ret;
 
@@ -302,6 +312,7 @@ static int xen_do_unmap(struct xen_gem_object *xen_obj)
 		gnttab_set_unmap_op(&unmap_ops[i], addr,
 			GNTMAP_host_map | GNTMAP_device_map,
 			xen_obj->map_handles[i]);
+		unmap_ops[i].dev_bus_addr = xen_obj->dev_bus_addr[i];
 	}
 	DRM_DEBUG("++++++++++++ Unmapping refs\n");
 	BUG_ON(gnttab_unmap_refs(unmap_ops, NULL, xen_obj->pages,
@@ -314,6 +325,8 @@ static int xen_do_unmap(struct xen_gem_object *xen_obj)
 	xen_obj->pages = NULL;
 	kfree(xen_obj->map_handles);
 	xen_obj->map_handles = NULL;
+	kfree(xen_obj->dev_bus_addr);
+	xen_obj->dev_bus_addr = NULL;
 	kfree(unmap_ops);
 	return 0;
 }
