@@ -251,9 +251,21 @@ static int xen_do_map(struct xen_gem_object *xen_obj)
 			xen_obj->grefs[i], xen_obj->otherend_id);
 	}
 	DRM_DEBUG("++++++++++++ Mapping refs\n");
+	{
+		int k;
+
+		for (k = 0; k < 10; k++)
+			DRM_ERROR("++++++++++++ page[%d] %llx\n", k, xen_page_to_vaddr(xen_obj->pages[k]));
+	}
 	ret = gnttab_map_refs(map_ops, NULL, xen_obj->pages,
 		xen_obj->num_pages);
 	BUG_ON(ret);
+	{
+		int k;
+
+		for (k = 0; k < 10; k++)
+			DRM_ERROR("++++++++++++ page[%d] %llx\n", k, xen_page_to_vaddr(xen_obj->pages[k]));
+	}
 	for (i = 0; i < xen_obj->num_pages; i++) {
 		xen_obj->map_handles[i] = map_ops[i].handle;
 		if (unlikely(map_ops[i].status != GNTST_okay)) {
@@ -279,7 +291,7 @@ fail:
 static int xen_do_unmap(struct xen_gem_object *xen_obj)
 {
 	struct gnttab_unmap_grant_ref *unmap_ops;
-	int i, size;
+	int i, size, ret;
 
 	if (!xen_obj->pages || !xen_obj->map_handles)
 		return 0;
@@ -304,8 +316,25 @@ static int xen_do_unmap(struct xen_gem_object *xen_obj)
 			xen_obj->map_handles[i]);
 	}
 	DRM_DEBUG("++++++++++++ Unmapping refs\n");
-	BUG_ON(gnttab_unmap_refs(unmap_ops, NULL, xen_obj->pages,
-		xen_obj->num_pages));
+	{
+		int k;
+
+		for (k = 0; k < 10; k++)
+			DRM_ERROR("++++++++++++ page[%d] %llx\n", k, xen_page_to_vaddr(xen_obj->pages[k]));
+	}
+	ret = gnttab_unmap_refs(unmap_ops, NULL, xen_obj->pages,
+		xen_obj->num_pages);
+	if (ret)
+	{
+		for (i = 0; i < xen_obj->num_pages; i++) {
+			if (unlikely(unmap_ops[i].status != GNTST_okay)) {
+				DRM_ERROR("Failed to unmap for gref 0x%04x status %d %s\n",
+					xen_obj->grefs[i], unmap_ops[i].status,
+					xen_gnttab_err_to_string(unmap_ops[i].status));
+			}
+		}
+		BUG();
+	}
 
 	DRM_DEBUG("++++++++++++ Freeing %d ballooned pages\n",
 		xen_obj->num_pages);
@@ -343,6 +372,14 @@ static void xen_gem_close_object(struct drm_gem_object *gem_obj,
 		gem_obj->handle_count);
 	WARN_ON(gem_obj->handle_count != 1);
 	if (gem_obj->handle_count == 1) {
+		{
+			int k;
+
+			DRM_ERROR("++++++++++++ Close handle %d\n", xen_obj->dumb_handle);
+			for (k = 0; k < 10; k++)
+				DRM_ERROR("++++++++++++ gref %d is 0x%04x\n",
+					k, xen_obj->grefs[k]);
+		}
 		xen_do_unmap(xen_obj);
 		kfree(xen_obj->grefs);
 		xen_obj->grefs = NULL;
@@ -369,18 +406,15 @@ static int xen_gem_create_with_handle(
 	struct drm_gem_object *gem_obj;
 	int ret;
 
-	ret = drm_gem_object_init(dev, &xen_obj->base, xen_obj->size);
-	if (ret < 0) {
-		DRM_DEBUG("++++++++++++ Failed to initialize GEM, ret %d\n",
-			ret);
-		return ret;
-	}
+	drm_gem_private_object_init(dev, &xen_obj->base, xen_obj->size);
 	gem_obj = &xen_obj->base;
+#if 0
 	ret = drm_gem_create_mmap_offset(gem_obj);
 	if (ret < 0) {
 		drm_gem_object_release(gem_obj);
 		return ret;
 	}
+#endif
 	ret = drm_gem_handle_create(file_priv, gem_obj, &xen_obj->dumb_handle);
 	DRM_ERROR("++++++++++++ Handle is %d, ret %d\n", xen_obj->dumb_handle, ret);
 	/* drop reference from allocate - handle holds it now. */
@@ -450,6 +484,14 @@ static int xendrm_do_dumb_create(struct drm_device *dev,
 	req->dumb.handle = xen_obj->dumb_handle;
 	DRM_DEBUG("++++++++++++ Create GEM object, ref %d\n",
 		atomic_read(&xen_obj->base.refcount.refcount));
+	{
+		int k;
+
+		DRM_ERROR("++++++++++++ Create handle %d\n", xen_obj->dumb_handle);
+		for (k = 0; k < 10; k++)
+			DRM_ERROR("++++++++++++ gref %d is 0x%04x\n",
+				k, xen_obj->grefs[k]);
+	}
 	return 0;
 
 fail:
