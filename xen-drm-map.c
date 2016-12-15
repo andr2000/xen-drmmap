@@ -40,20 +40,23 @@ struct xen_info {
 struct xen_gem_object {
 	struct drm_gem_object base;
 	uint32_t dumb_handle;
+
+	/* Xen related */
+	int otherend_id;
 	int size;
+	uint32_t num_pages;
+	grant_ref_t *grefs;
 	/* these are pages from Xen balloon */
 	struct page **pages;
+	/* and their map grant handles and addresses */
+	struct map_info {
+		grant_handle_t handle;
+		uint64_t dev_bus_addr;
+	} *map_info;
 #ifndef CONFIG_XEN_HAVE_PVMMU
 	dma_addr_t paddr;
 	void *vaddr;
 #endif
-	/* and their map grant handles */
-	grant_handle_t *map_handles;
-	uint64_t *dev_bus_addr;
-	/* Xen */
-	uint32_t num_pages;
-	grant_ref_t *grefs;
-	int otherend_id;
 };
 
 static const char *gnttabop_error_msgs[] = GNTTABOP_error_msgs;
@@ -220,15 +223,9 @@ static int xen_do_map(struct xen_gem_object *xen_obj)
 		ret = -ENOMEM;
 		goto fail;
 	}
-	size = xen_obj->num_pages * sizeof(*(xen_obj->map_handles));
-	xen_obj->map_handles = kzalloc(size, GFP_KERNEL);
-	if (!xen_obj->map_handles) {
-		ret = -ENOMEM;
-		goto fail;
-	}
-	size = xen_obj->num_pages * sizeof(*(xen_obj->dev_bus_addr));
-	xen_obj->dev_bus_addr = kzalloc(size, GFP_KERNEL);
-	if (!xen_obj->dev_bus_addr) {
+	xen_obj->map_info = kcalloc(xen_obj->num_pages,
+		sizeof(*xen_obj->map_info), GFP_KERNEL);
+	if (!xen_obj->map_info) {
 		ret = -ENOMEM;
 		goto fail;
 	}
@@ -262,8 +259,8 @@ static int xen_do_map(struct xen_gem_object *xen_obj)
 		xen_obj->num_pages);
 	BUG_ON(ret);
 	for (i = 0; i < xen_obj->num_pages; i++) {
-		xen_obj->map_handles[i] = map_ops[i].handle;
-		xen_obj->dev_bus_addr[i] = map_ops[i].dev_bus_addr;
+		xen_obj->map_info[i].handle = map_ops[i].handle;
+		xen_obj->map_info[i].dev_bus_addr = map_ops[i].dev_bus_addr;
 		if (unlikely(map_ops[i].status != GNTST_okay)) {
 			DRM_ERROR("Failed to set map op for page %d, ref %d: %s (%d)\n",
 				i, xen_obj->grefs[i],
@@ -277,10 +274,8 @@ static int xen_do_map(struct xen_gem_object *xen_obj)
 fail:
 	kfree(xen_obj->pages);
 	xen_obj->pages = NULL;
-	kfree(xen_obj->map_handles);
-	xen_obj->map_handles = NULL;
-	kfree(xen_obj->dev_bus_addr);
-	xen_obj->dev_bus_addr = NULL;
+	kfree(xen_obj->map_info);
+	xen_obj->map_info = NULL;
 	kfree(map_ops);
 	return ret;
 
@@ -291,7 +286,7 @@ static int xen_do_unmap(struct xen_gem_object *xen_obj)
 	struct gnttab_unmap_grant_ref *unmap_ops;
 	int i, size;
 
-	if (!xen_obj->pages || !xen_obj->map_handles)
+	if (!xen_obj->pages || !xen_obj->map_info)
 		return 0;
 
 	size = xen_obj->num_pages * sizeof(*unmap_ops);
@@ -311,8 +306,8 @@ static int xen_do_unmap(struct xen_gem_object *xen_obj)
 		addr = xen_page_to_vaddr(xen_obj->pages[i]);
 		gnttab_set_unmap_op(&unmap_ops[i], addr,
 			GNTMAP_host_map | GNTMAP_device_map,
-			xen_obj->map_handles[i]);
-		unmap_ops[i].dev_bus_addr = xen_obj->dev_bus_addr[i];
+			xen_obj->map_info[i].handle);
+		unmap_ops[i].dev_bus_addr = xen_obj->map_info[i].dev_bus_addr;
 	}
 	DRM_DEBUG("++++++++++++ Unmapping refs\n");
 	BUG_ON(gnttab_unmap_refs(unmap_ops, NULL, xen_obj->pages,
@@ -323,10 +318,8 @@ static int xen_do_unmap(struct xen_gem_object *xen_obj)
 	xen_free_ballooned_pages(xen_obj);
 	kfree(xen_obj->pages);
 	xen_obj->pages = NULL;
-	kfree(xen_obj->map_handles);
-	xen_obj->map_handles = NULL;
-	kfree(xen_obj->dev_bus_addr);
-	xen_obj->dev_bus_addr = NULL;
+	kfree(xen_obj->map_info);
+	xen_obj->map_info = NULL;
 	kfree(unmap_ops);
 	return 0;
 }
