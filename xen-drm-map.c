@@ -209,15 +209,15 @@ static void xen_free_ballooned_pages(struct xen_gem_object *xen_obj)
 static int xen_do_map(struct xen_gem_object *xen_obj)
 {
 	struct gnttab_map_grant_ref *map_ops = NULL;
-	int ret, i, size;
+	int ret, i;
 
 	if (xen_obj->pages) {
 		DRM_ERROR("Mapping already mapped pages?\n");
 		return -EINVAL;
 	}
 	DRM_DEBUG("++++++++++++ Allocating buffers\n");
-	size = xen_obj->num_pages * sizeof(*(xen_obj->pages));
-	xen_obj->pages = kzalloc(size, GFP_KERNEL);
+	xen_obj->pages = kcalloc(xen_obj->num_pages, sizeof(*xen_obj->pages),
+		GFP_KERNEL);
 	if (!xen_obj->pages) {
 		ret = -ENOMEM;
 		goto fail;
@@ -228,8 +228,7 @@ static int xen_do_map(struct xen_gem_object *xen_obj)
 		ret = -ENOMEM;
 		goto fail;
 	}
-	size = xen_obj->num_pages * sizeof(*map_ops);
-	map_ops = kzalloc(size, GFP_KERNEL);
+	map_ops = kcalloc(xen_obj->num_pages, sizeof(*map_ops), GFP_KERNEL);
 	if (!map_ops) {
 		ret = -ENOMEM;
 		goto fail;
@@ -283,13 +282,12 @@ fail:
 static int xen_do_unmap(struct xen_gem_object *xen_obj)
 {
 	struct gnttab_unmap_grant_ref *unmap_ops;
-	int i, size;
+	int i;
 
 	if (!xen_obj->pages || !xen_obj->map_info)
 		return 0;
 
-	size = xen_obj->num_pages * sizeof(*unmap_ops);
-	unmap_ops = kzalloc(size, GFP_KERNEL);
+	unmap_ops = kcalloc(xen_obj->num_pages, sizeof(*unmap_ops), GFP_KERNEL);
 	if (!unmap_ops)
 		return -ENOMEM;
 	DRM_DEBUG("++++++++++++ Setting GNTMAP_host_map|GNTMAP_device_map\n");
@@ -415,7 +413,7 @@ static int xendrm_do_dumb_create(struct drm_device *dev,
 	struct drm_file *file_priv)
 {
 	struct xen_gem_object *xen_obj;
-	int sz, ret;
+	int ret;
 
 	xen_obj = kzalloc(sizeof(*xen_obj), GFP_KERNEL);
 	if (!xen_obj)
@@ -424,13 +422,14 @@ static int xendrm_do_dumb_create(struct drm_device *dev,
 	xen_obj->num_pages = req->num_grefs;
 	xen_obj->otherend_id = req->otherend_id;
 
-	sz = xen_obj->num_pages * sizeof(grant_ref_t);
-	xen_obj->grefs = kzalloc(sz, GFP_KERNEL);
+	xen_obj->grefs = kcalloc(xen_obj->num_pages, sizeof(grant_ref_t),
+		GFP_KERNEL);
 	if (!xen_obj->grefs) {
 		ret = -ENOMEM;
 		goto fail;
 	}
-	if (copy_from_user(xen_obj->grefs, req->grefs, sz)) {
+	if (copy_from_user(xen_obj->grefs, req->grefs,
+			xen_obj->num_pages * sizeof(grant_ref_t))) {
 		ret = -EINVAL;
 		goto fail;
 	}
