@@ -547,8 +547,10 @@ static int xen_remove(struct platform_device *pdev)
 	struct xen_info *info = platform_get_drvdata(pdev);
 	struct drm_device *drm_dev = info->drm_dev;
 
-	drm_dev_unregister(drm_dev);
-	drm_dev_unref(drm_dev);
+	if (drm_dev) {
+		drm_dev_unregister(drm_dev);
+		drm_dev_unref(drm_dev);
+	}
 	return 0;
 }
 
@@ -567,13 +569,13 @@ static int xen_probe(struct platform_device *pdev)
 	if (!drm_dev)
 		return -ENOMEM;
 
-	info->drm_dev = drm_dev;
 	drm_dev->dev_private = info;
 	platform_set_drvdata(pdev, info);
 
 	ret = drm_dev_register(drm_dev, 0);
 	if (ret)
 		goto fail;
+	info->drm_dev = drm_dev;
 
 	DRM_INFO("Initialized %s %d.%d.%d %s on minor %d\n",
 		xen_driver.name, xen_driver.major,
