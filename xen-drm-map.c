@@ -215,7 +215,7 @@ static int xen_do_map(struct xen_gem_object *xen_obj)
 		DRM_ERROR("Mapping already mapped pages?\n");
 		return -EINVAL;
 	}
-	DRM_DEBUG("++++++++++++ Allocating buffers\n");
+	DRM_ERROR("++++++++++++ Allocating buffers\n");
 	xen_obj->pages = kcalloc(xen_obj->num_pages, sizeof(*xen_obj->pages),
 		GFP_KERNEL);
 	if (!xen_obj->pages) {
@@ -233,7 +233,7 @@ static int xen_do_map(struct xen_gem_object *xen_obj)
 		ret = -ENOMEM;
 		goto fail;
 	}
-	DRM_DEBUG("++++++++++++ Allocating %d ballooned pages\n",
+	DRM_ERROR("++++++++++++ Allocating %d ballooned pages\n",
 		xen_obj->num_pages);
 	ret = xen_alloc_ballooned_pages(xen_obj);
 	if (ret < 0) {
@@ -241,7 +241,7 @@ static int xen_do_map(struct xen_gem_object *xen_obj)
 			xen_obj->num_pages, ret);
 		goto fail;
 	}
-	DRM_DEBUG("++++++++++++ Setting GNTMAP_host_map|GNTMAP_device_map\n");
+	DRM_ERROR("++++++++++++ Setting GNTMAP_host_map|GNTMAP_device_map\n");
 	for (i = 0; i < xen_obj->num_pages; i++) {
 		phys_addr_t addr;
 
@@ -252,7 +252,7 @@ static int xen_do_map(struct xen_gem_object *xen_obj)
 			GNTMAP_host_map | GNTMAP_device_map,
 			xen_obj->grefs[i], xen_obj->otherend_id);
 	}
-	DRM_DEBUG("++++++++++++ Mapping refs\n");
+	DRM_ERROR("++++++++++++ Mapping refs\n");
 	ret = gnttab_map_refs(map_ops, NULL, xen_obj->pages,
 		xen_obj->num_pages);
 	BUG_ON(ret);
@@ -290,7 +290,7 @@ static int xen_do_unmap(struct xen_gem_object *xen_obj)
 	unmap_ops = kcalloc(xen_obj->num_pages, sizeof(*unmap_ops), GFP_KERNEL);
 	if (!unmap_ops)
 		return -ENOMEM;
-	DRM_DEBUG("++++++++++++ Setting GNTMAP_host_map|GNTMAP_device_map\n");
+	DRM_ERROR("++++++++++++ Setting GNTMAP_host_map|GNTMAP_device_map\n");
 	for (i = 0; i < xen_obj->num_pages; i++) {
 		phys_addr_t addr;
 
@@ -306,11 +306,11 @@ static int xen_do_unmap(struct xen_gem_object *xen_obj)
 			xen_obj->map_info[i].handle);
 		unmap_ops[i].dev_bus_addr = xen_obj->map_info[i].dev_bus_addr;
 	}
-	DRM_DEBUG("++++++++++++ Unmapping refs\n");
+	DRM_ERROR("++++++++++++ Unmapping refs\n");
 	BUG_ON(gnttab_unmap_refs(unmap_ops, NULL, xen_obj->pages,
 		xen_obj->num_pages));
 
-	DRM_DEBUG("++++++++++++ Freeing %d ballooned pages\n",
+	DRM_ERROR("++++++++++++ Freeing %d ballooned pages\n",
 		xen_obj->num_pages);
 	xen_free_ballooned_pages(xen_obj);
 	kfree(xen_obj->pages);
@@ -341,7 +341,7 @@ static void xen_gem_close_object(struct drm_gem_object *gem_obj,
 	 * imported our dma_buf
 	 */
 	mutex_lock(&gem_obj->dev->object_name_lock);
-	DRM_DEBUG("++++++++++++ Closing GEM object handle %d, ref %d handle_count %d\n",
+	DRM_ERROR("++++++++++++ Closing GEM object handle %d, ref %d handle_count %d\n",
 		xen_obj->dumb_handle, atomic_read(&gem_obj->refcount.refcount),
 		gem_obj->handle_count);
 	WARN_ON(gem_obj->handle_count != 1);
@@ -360,7 +360,7 @@ static void xen_gem_free_object(struct drm_gem_object *gem_obj)
 	/* FIXME: this gets called on driver .release because of
 	 * .handle_to_fd_ioctl + .prime_export
 	 */
-	DRM_DEBUG("++++++++++++ Freeing GEM object\n");
+	DRM_ERROR("++++++++++++ Freeing GEM object\n");
 	if (unlikely(xen_obj->grefs)) {
 		/* leftovers due to backend crash? */
 		xen_do_unmap(xen_obj);
@@ -423,7 +423,7 @@ static int xendrm_do_dumb_create(struct drm_device *dev,
 	xen_obj = kzalloc(sizeof(*xen_obj), GFP_KERNEL);
 	if (!xen_obj)
 		return -ENOMEM;
-	DRM_DEBUG("++++++++++++ Creating DUMB\n");
+	DRM_ERROR("++++++++++++ Creating DUMB\n");
 	xen_obj->num_pages = req->num_grefs;
 	xen_obj->otherend_id = req->otherend_id;
 
@@ -447,7 +447,7 @@ static int xendrm_do_dumb_create(struct drm_device *dev,
 		goto fail;
 	/* return handle */
 	req->dumb.handle = xen_obj->dumb_handle;
-	DRM_DEBUG("++++++++++++ Create GEM object, ref %d\n",
+	DRM_ERROR("++++++++++++ Create GEM object, ref %d\n",
 		atomic_read(&xen_obj->base.refcount.refcount));
 	return 0;
 
@@ -511,9 +511,9 @@ static struct sg_table *xen_gem_prime_get_sg_table(
 	 */
 	sgt = drm_prime_pages_to_sg(xen_obj->pages, xen_obj->num_pages);
 	if (unlikely(!sgt))
-		DRM_DEBUG("++++++++++++ Failed to export sgt\n");
+		DRM_ERROR("++++++++++++ Failed to export sgt\n");
 	else
-		DRM_DEBUG("++++++++++++ Exporting %scontiguous buffer\n",
+		DRM_ERROR("++++++++++++ Exporting %scontiguous buffer\n",
 			sgt->nents == 1 ? "" : "non-");
 	return sgt;
 }
