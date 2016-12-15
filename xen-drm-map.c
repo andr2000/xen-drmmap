@@ -43,7 +43,6 @@ struct xen_gem_object {
 
 	/* Xen related */
 	int otherend_id;
-	int size;
 	uint32_t num_pages;
 	grant_ref_t *grefs;
 	/* these are pages from Xen balloon */
@@ -370,12 +369,12 @@ static void xen_gem_free_object(struct drm_gem_object *gem_obj)
 
 static int xen_gem_create_with_handle(
 	struct xen_gem_object *xen_obj, struct drm_file *file_priv,
-	struct drm_device *dev)
+	struct drm_device *dev, int size)
 {
 	struct drm_gem_object *gem_obj;
 	int ret;
 
-	drm_gem_private_object_init(dev, &xen_obj->base, xen_obj->size);
+	drm_gem_private_object_init(dev, &xen_obj->base, size);
 	gem_obj = &xen_obj->base;
 	ret = drm_gem_handle_create(file_priv, gem_obj, &xen_obj->dumb_handle);
 	DRM_ERROR("++++++++++++ Handle is %d, ret %d\n", xen_obj->dumb_handle, ret);
@@ -385,12 +384,12 @@ static int xen_gem_create_with_handle(
 }
 
 static int xendrm_create_dumb_obj(struct xen_gem_object *xen_obj,
-	struct drm_device *dev, struct drm_file *file_priv)
+	struct drm_device *dev, struct drm_file *file_priv, int size)
 {
 	struct drm_gem_object *gem_obj;
 	int ret;
 
-	ret = xen_gem_create_with_handle(xen_obj, file_priv, dev);
+	ret = xen_gem_create_with_handle(xen_obj, file_priv, dev, size);
 	if (ret < 0)
 		goto fail;
 	gem_obj = drm_gem_object_lookup(file_priv, xen_obj->dumb_handle);
@@ -424,7 +423,6 @@ static int xendrm_do_dumb_create(struct drm_device *dev,
 	DRM_DEBUG("++++++++++++ Creating DUMB\n");
 	xen_obj->num_pages = req->num_grefs;
 	xen_obj->otherend_id = req->otherend_id;
-	xen_obj->size = round_up(req->dumb.size, PAGE_SIZE);
 
 	sz = xen_obj->num_pages * sizeof(grant_ref_t);
 	xen_obj->grefs = kzalloc(sz, GFP_KERNEL);
@@ -439,7 +437,8 @@ static int xendrm_do_dumb_create(struct drm_device *dev,
 	ret = xen_do_map(xen_obj);
 	if (ret < 0)
 		goto fail;
-	ret = xendrm_create_dumb_obj(xen_obj, dev, file_priv);
+	ret = xendrm_create_dumb_obj(xen_obj, dev, file_priv,
+		round_up(req->dumb.size, PAGE_SIZE));
 	if (ret < 0)
 		goto fail;
 	/* return handle */
