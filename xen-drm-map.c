@@ -361,6 +361,11 @@ static void xen_gem_free_object(struct drm_gem_object *gem_obj)
 	 * .handle_to_fd_ioctl + .prime_export
 	 */
 	DRM_DEBUG("++++++++++++ Freeing GEM object\n");
+	if (unlikely(xen_obj->grefs)) {
+		/* leftovers due to backend crash? */
+		xen_do_unmap(xen_obj);
+		kfree(xen_obj->grefs);
+	}
 	drm_gem_object_release(gem_obj);
 	kfree(xen_obj);
 }
