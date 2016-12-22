@@ -309,6 +309,14 @@ static int xen_do_unmap(struct xen_gem_object *xen_obj)
 	DRM_ERROR("++++++++++++ Unmapping refs\n");
 	BUG_ON(gnttab_unmap_refs(unmap_ops, NULL, xen_obj->pages,
 		xen_obj->num_pages));
+	for (i = 0; i < xen_obj->num_pages; i++) {
+		if (unlikely(unmap_ops[i].status != GNTST_okay)) {
+			DRM_ERROR("Failed to unmap page %d, ref %d: %s (%d)\n",
+				i, xen_obj->grefs[i],
+				xen_gnttab_err_to_string(unmap_ops[i].status),
+				unmap_ops[i].status);
+		}
+	}
 
 	DRM_ERROR("++++++++++++ Freeing %d ballooned pages\n",
 		xen_obj->num_pages);
