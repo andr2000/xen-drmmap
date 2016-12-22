@@ -503,6 +503,12 @@ static int xen_create_dumb_ioctl(struct drm_device *dev,
 	return xendrm_do_dumb_create(dev, req, file_priv);
 }
 
+#ifdef CONFIG_SWIOTLB
+#define swiotlb_active() swiotlb_nr_tbl()
+#else
+#define swiotlb_active() 0
+#endif
+
 static struct sg_table *xen_gem_prime_get_sg_table(
 	struct drm_gem_object *gem_obj)
 {
@@ -515,7 +521,24 @@ static struct sg_table *xen_gem_prime_get_sg_table(
 	 * is contiguous. otherwise CMA drivers will not accept
 	 * the buffer
 	 */
-	sgt = drm_prime_pages_to_sg(xen_obj->pages, xen_obj->num_pages);
+	if (swiotlb_active()) {
+		struct scatterlist *sg;
+		int i;
+
+		sgt = kmalloc(sizeof(*sgt), GFP_KERNEL);
+		if (!sgt)
+			return NULL;
+
+		if (sg_alloc_table(sgt, xen_obj->num_pages, GFP_KERNEL) < 0) {
+			kfree(sgt);
+			return NULL;
+		}
+		for_each_sg(sgt->sgl, sg, xen_obj->num_pages, i)
+			sg_set_page(sg, xen_obj->pages[i], PAGE_SIZE, 0);
+
+	} else {
+		sgt = drm_prime_pages_to_sg(xen_obj->pages, xen_obj->num_pages);
+	}
 	if (unlikely(!sgt)) {
 		DRM_ERROR("++++++++++++ Failed to export sgt\n");
 	} else {
