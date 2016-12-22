@@ -516,11 +516,17 @@ static struct sg_table *xen_gem_prime_get_sg_table(
 	 * the buffer
 	 */
 	sgt = drm_prime_pages_to_sg(xen_obj->pages, xen_obj->num_pages);
-	if (unlikely(!sgt))
+	if (unlikely(!sgt)) {
 		DRM_ERROR("++++++++++++ Failed to export sgt\n");
-	else
-		DRM_ERROR("++++++++++++ Exporting %scontiguous buffer\n",
-			sgt->nents == 1 ? "" : "non-");
+	} else {
+		struct scatterlist *sg;
+		int i;
+
+		DRM_ERROR("++++++++++++ Exporting %scontiguous buffer nents %d\n",
+			sgt->nents == 1 ? "" : "non-", sgt->nents);
+		for_each_sg(sgt->sgl, sg, sgt->nents, i)
+			DRM_ERROR("Segment %d length %d\n", i, sg->length);
+	}
 	return sgt;
 }
 
