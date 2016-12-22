@@ -30,8 +30,6 @@
 #include <xen/grant_table.h>
 
 #include "xen-drm-map.h"
-#include "xen-drm-logs.h"
-
 
 struct xen_info {
 	struct drm_device *drm_dev;
@@ -573,7 +571,7 @@ static int xen_probe(struct platform_device *pdev)
 	struct drm_device *drm_dev;
 	int ret;
 
-	LOG0("Creating %s", xen_driver.desc);
+	DRM_INFO("Creating %s\n", xen_driver.desc);
 	info = devm_kzalloc(&pdev->dev, sizeof(*info), GFP_KERNEL);
 	if (!info)
 		return -ENOMEM;
@@ -624,13 +622,13 @@ static int __init xen_init(void)
 
 	xen_pdev = platform_device_register_full(&xen_ddrv_platform_info);
 	if (!xen_pdev) {
-		LOG0("Failed to register " XENDRMMAP_DRIVER_NAME \
+		DRM_ERROR("Failed to register " XENDRMMAP_DRIVER_NAME \
 			" device: %d\n", ret);
 		return -ENODEV;
 	}
 	ret = platform_driver_register(&xen_ddrv_info);
 	if (ret != 0) {
-		LOG0("Failed to register " XENDRMMAP_DRIVER_NAME \
+		DRM_ERROR("Failed to register " XENDRMMAP_DRIVER_NAME \
 			" driver: %d\n", ret);
 		platform_device_unregister(xen_pdev);
 		return ret;
