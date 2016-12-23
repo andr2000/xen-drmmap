@@ -93,8 +93,7 @@ static int xen_alloc_ballooned_pages(struct xen_gem_object *xen_obj)
 
 	num_pages = xen_obj->num_pages;
 	pages = xen_obj->pages;
-	DRM_ERROR("Ballooning out %d pages", num_pages);
-
+	DRM_DEBUG("Ballooning out %d pages", num_pages);
 	frame_list = kcalloc(num_pages, sizeof(*frame_list), GFP_KERNEL);
 	if (!frame_list)
 		return -ENOMEM;
@@ -102,7 +101,8 @@ static int xen_alloc_ballooned_pages(struct xen_gem_object *xen_obj)
 	vaddr = dma_alloc_wc(xen_obj->base.dev->dev, size, &paddr,
 		GFP_KERNEL | __GFP_NOWARN);
 	if (!vaddr) {
-		DRM_ERROR("Failed to allocate DMA buffer with size %zu\n", size);
+		DRM_ERROR("Failed to allocate DMA buffer with size %zu\n",
+			size);
 		ret = -ENOMEM;
 		goto fail;
 	}
@@ -122,14 +122,14 @@ again:
 	/* rc will hold number of pages processed */
 	ret = HYPERVISOR_memory_op(XENMEM_populate_physmap, &reservation);
 	if (ret <= 0) {
-		DRM_ERROR("Failed to balloon out %d pages, retrying", num_pages);
+		DRM_ERROR("Failed to balloon out %d pages, retrying",
+			num_pages);
 		if (--tries_left)
 			goto again;
 		WARN_ON(ret != num_pages);
 		ret = -EFAULT;
 		goto fail;
 	}
-	DRM_ERROR("Ballooned out %d pages", ret);
 	xen_obj->vaddr = vaddr;
 	xen_obj->paddr = paddr;
 	kfree(frame_list);
@@ -166,7 +166,7 @@ static void xen_free_ballooned_pages(struct xen_gem_object *xen_obj)
 		DRM_ERROR("Failed to balloon in %d pages", num_pages);
 		return;
 	}
-	DRM_ERROR("Ballooning in %d pages", num_pages);
+	DRM_DEBUG("Ballooning in %d pages", num_pages);
 	size = num_pages * PAGE_SIZE;
 	for (i = 0; i < num_pages; i++) {
 		/* XENMEM_populate_physmap requires a PFN based on Xen
@@ -182,7 +182,6 @@ static void xen_free_ballooned_pages(struct xen_gem_object *xen_obj)
 		DRM_ERROR("Failed to balloon in %d pages", num_pages);
 		WARN_ON(ret != num_pages);
 	}
-	DRM_ERROR("Ballooned in %d pages", ret);
 	if (xen_obj->vaddr)
 		dma_free_wc(xen_obj->base.dev->dev, size,
 			xen_obj->vaddr, xen_obj->paddr);
@@ -192,7 +191,8 @@ static void xen_free_ballooned_pages(struct xen_gem_object *xen_obj)
 }
 #endif
 
-#define xen_page_to_vaddr(page) ((phys_addr_t)pfn_to_kaddr(page_to_xen_pfn(page)))
+#define xen_page_to_vaddr(page) \
+	((phys_addr_t)pfn_to_kaddr(page_to_xen_pfn(page)))
 
 static int xen_do_map(struct xen_gem_object *xen_obj)
 {
@@ -203,7 +203,6 @@ static int xen_do_map(struct xen_gem_object *xen_obj)
 		DRM_ERROR("Mapping already mapped pages?\n");
 		return -EINVAL;
 	}
-	DRM_ERROR("++++++++++++ Allocating buffers\n");
 	xen_obj->pages = kcalloc(xen_obj->num_pages, sizeof(*xen_obj->pages),
 		GFP_KERNEL);
 	if (!xen_obj->pages) {
@@ -221,15 +220,12 @@ static int xen_do_map(struct xen_gem_object *xen_obj)
 		ret = -ENOMEM;
 		goto fail;
 	}
-	DRM_ERROR("++++++++++++ Allocating %d ballooned pages\n",
-		xen_obj->num_pages);
 	ret = xen_alloc_ballooned_pages(xen_obj);
 	if (ret < 0) {
-		DRM_ERROR("++++++++++++ Cannot allocate %d ballooned pages, ret %d\n",
+		DRM_ERROR("Cannot allocate %d ballooned pages: %d\n",
 			xen_obj->num_pages, ret);
 		goto fail;
 	}
-	DRM_ERROR("++++++++++++ Setting GNTMAP_host_map|GNTMAP_device_map\n");
 	for (i = 0; i < xen_obj->num_pages; i++) {
 		phys_addr_t addr;
 
@@ -240,18 +236,15 @@ static int xen_do_map(struct xen_gem_object *xen_obj)
 			GNTMAP_host_map | GNTMAP_device_map,
 			xen_obj->grefs[i], xen_obj->otherend_id);
 	}
-	DRM_ERROR("++++++++++++ Mapping refs\n");
 	ret = gnttab_map_refs(map_ops, NULL, xen_obj->pages,
 		xen_obj->num_pages);
 	BUG_ON(ret);
 	for (i = 0; i < xen_obj->num_pages; i++) {
 		xen_obj->map_info[i].handle = map_ops[i].handle;
 		xen_obj->map_info[i].dev_bus_addr = map_ops[i].dev_bus_addr;
-		if (unlikely(map_ops[i].status != GNTST_okay)) {
-			DRM_ERROR("Failed to set map op for page %d, ref %d: %d\n",
-				i, xen_obj->grefs[i],
-				map_ops[i].status);
-		}
+		if (unlikely(map_ops[i].status != GNTST_okay))
+			DRM_ERROR("Failed to map page %d with ref %d: %d\n",
+				i, xen_obj->grefs[i], map_ops[i].status);
 	}
 	kfree(map_ops);
 	return 0;
@@ -277,7 +270,6 @@ static int xen_do_unmap(struct xen_gem_object *xen_obj)
 	unmap_ops = kcalloc(xen_obj->num_pages, sizeof(*unmap_ops), GFP_KERNEL);
 	if (!unmap_ops)
 		return -ENOMEM;
-	DRM_ERROR("++++++++++++ Setting GNTMAP_host_map|GNTMAP_device_map\n");
 	for (i = 0; i < xen_obj->num_pages; i++) {
 		phys_addr_t addr;
 
@@ -293,19 +285,13 @@ static int xen_do_unmap(struct xen_gem_object *xen_obj)
 			xen_obj->map_info[i].handle);
 		unmap_ops[i].dev_bus_addr = xen_obj->map_info[i].dev_bus_addr;
 	}
-	DRM_ERROR("++++++++++++ Unmapping refs\n");
 	BUG_ON(gnttab_unmap_refs(unmap_ops, NULL, xen_obj->pages,
 		xen_obj->num_pages));
 	for (i = 0; i < xen_obj->num_pages; i++) {
-		if (unlikely(unmap_ops[i].status != GNTST_okay)) {
-			DRM_ERROR("Failed to unmap page %d, ref %d: %d\n",
-				i, xen_obj->grefs[i],
-				unmap_ops[i].status);
-		}
+		if (unlikely(unmap_ops[i].status != GNTST_okay))
+			DRM_ERROR("Failed to unmap page %d with ref %d: %d\n",
+				i, xen_obj->grefs[i], unmap_ops[i].status);
 	}
-
-	DRM_ERROR("++++++++++++ Freeing %d ballooned pages\n",
-		xen_obj->num_pages);
 	xen_free_ballooned_pages(xen_obj);
 	kfree(xen_obj->pages);
 	xen_obj->pages = NULL;
@@ -314,7 +300,6 @@ static int xen_do_unmap(struct xen_gem_object *xen_obj)
 	kfree(unmap_ops);
 	return 0;
 }
-
 
 static void xen_gem_close_object(struct drm_gem_object *gem_obj,
 	struct drm_file *file_priv)
@@ -335,9 +320,6 @@ static void xen_gem_close_object(struct drm_gem_object *gem_obj,
 	 * imported our dma_buf
 	 */
 	mutex_lock(&gem_obj->dev->object_name_lock);
-	DRM_ERROR("++++++++++++ Closing GEM object handle %d, ref %d handle_count %d\n",
-		xen_obj->dumb_handle, atomic_read(&gem_obj->refcount.refcount),
-		gem_obj->handle_count);
 	WARN_ON(gem_obj->handle_count != 1);
 	if (gem_obj->handle_count == 1) {
 		xen_do_unmap(xen_obj);
@@ -354,7 +336,6 @@ static void xen_gem_free_object(struct drm_gem_object *gem_obj)
 	/* FIXME: this gets called on driver .release because of
 	 * .handle_to_fd_ioctl + .prime_export
 	 */
-	DRM_ERROR("++++++++++++ Freeing GEM object\n");
 	if (unlikely(xen_obj->grefs)) {
 		/* leftovers due to backend crash? */
 		xen_do_unmap(xen_obj);
@@ -374,13 +355,12 @@ static int xen_gem_create_with_handle(
 	drm_gem_private_object_init(dev, &xen_obj->base, size);
 	gem_obj = &xen_obj->base;
 	ret = drm_gem_handle_create(file_priv, gem_obj, &xen_obj->dumb_handle);
-	DRM_ERROR("++++++++++++ Handle is %d, ret %d\n", xen_obj->dumb_handle, ret);
 	/* drop reference from allocate - handle holds it now. */
 	drm_gem_object_unreference_unlocked(gem_obj);
 	return ret;
 }
 
-static int XENDRM_ZCOPY_CREATE_DUMB_obj(struct xen_gem_object *xen_obj,
+static int xendrm_zcopy_create_dumb_obj(struct xen_gem_object *xen_obj,
 	struct drm_device *dev, struct drm_file *file_priv, int size)
 {
 	struct drm_gem_object *gem_obj;
@@ -391,8 +371,7 @@ static int XENDRM_ZCOPY_CREATE_DUMB_obj(struct xen_gem_object *xen_obj,
 		goto fail;
 	gem_obj = drm_gem_object_lookup(file_priv, xen_obj->dumb_handle);
 	if (!gem_obj) {
-		DRM_ERROR("++++++++++++ Lookup for handle %d failed",
-			xen_obj->dumb_handle);
+		DRM_ERROR("Lookup for handle %d failed", xen_obj->dumb_handle);
 		ret = -EINVAL;
 		goto fail_destroy;
 	}
@@ -402,7 +381,7 @@ static int XENDRM_ZCOPY_CREATE_DUMB_obj(struct xen_gem_object *xen_obj,
 fail_destroy:
 	drm_gem_dumb_destroy(file_priv, dev, xen_obj->dumb_handle);
 fail:
-	DRM_ERROR("++++++++++++ Failed to create dumb buffer, ret %d\n", ret);
+	DRM_ERROR("Failed to create dumb buffer: %d\n", ret);
 	xen_obj->dumb_handle = 0;
 	return ret;
 }
@@ -417,10 +396,8 @@ static int xendrm_do_dumb_create(struct drm_device *dev,
 	xen_obj = kzalloc(sizeof(*xen_obj), GFP_KERNEL);
 	if (!xen_obj)
 		return -ENOMEM;
-	DRM_ERROR("++++++++++++ Creating DUMB\n");
 	xen_obj->num_pages = req->num_grefs;
 	xen_obj->otherend_id = req->otherend_id;
-
 	xen_obj->grefs = kcalloc(xen_obj->num_pages, sizeof(grant_ref_t),
 		GFP_KERNEL);
 	if (!xen_obj->grefs) {
@@ -435,14 +412,12 @@ static int xendrm_do_dumb_create(struct drm_device *dev,
 	ret = xen_do_map(xen_obj);
 	if (ret < 0)
 		goto fail;
-	ret = XENDRM_ZCOPY_CREATE_DUMB_obj(xen_obj, dev, file_priv,
+	ret = xendrm_zcopy_create_dumb_obj(xen_obj, dev, file_priv,
 		round_up(req->dumb.size, PAGE_SIZE));
 	if (ret < 0)
 		goto fail;
 	/* return handle */
 	req->dumb.handle = xen_obj->dumb_handle;
-	DRM_ERROR("++++++++++++ Create GEM object, ref %d\n",
-		atomic_read(&xen_obj->base.refcount.refcount));
 	return 0;
 
 fail:
@@ -483,8 +458,7 @@ static int xen_create_dumb_ioctl(struct drm_device *dev,
 	args->size = args->pitch * args->height;
 	args->handle = 0;
 	if (req->num_grefs < DIV_ROUND_UP(args->size, PAGE_SIZE)) {
-		DRM_ERROR("++++++++++++ Provided %d pages, need %d\n",
-			req->num_grefs,
+		DRM_ERROR("Provided %d pages, need %d\n", req->num_grefs,
 			(int)DIV_ROUND_UP(args->size, PAGE_SIZE));
 		return -EINVAL;
 	}
@@ -527,17 +501,11 @@ static struct sg_table *xen_gem_prime_get_sg_table(
 	} else {
 		sgt = drm_prime_pages_to_sg(xen_obj->pages, xen_obj->num_pages);
 	}
-	if (unlikely(!sgt)) {
-		DRM_ERROR("++++++++++++ Failed to export sgt\n");
-	} else {
-		struct scatterlist *sg;
-		int i;
-
-		DRM_ERROR("++++++++++++ Exporting %scontiguous buffer nents %d\n",
+	if (unlikely(!sgt))
+		DRM_ERROR("Failed to export sgt\n");
+	else
+		DRM_DEBUG ("Exporting %scontiguous buffer nents %d\n",
 			sgt->nents == 1 ? "" : "non-", sgt->nents);
-		for_each_sg(sgt->sgl, sg, sgt->nents, i)
-			DRM_ERROR("Segment %d length %d\n", i, sg->length);
-	}
 	return sgt;
 }
 
