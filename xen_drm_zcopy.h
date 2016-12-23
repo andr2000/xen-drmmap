@@ -1,7 +1,5 @@
 /*
- *  Xen para-virtual DRM device
- *
- *  Based on
+ *  Xen para-virtual DRM zero copy device
  *
  *   This program is free software; you can redistribute it and/or modify
  *   it under the terms of the GNU General Public License as published by
@@ -16,10 +14,10 @@
  * Copyright (C) 2016 EPAM Systems Inc.
  */
 
-#ifndef __XEN_DRM_MAP_H
-#define __XEN_DRM_MAP_H
+#ifndef __XEN_DRM_ZCOPY_H
+#define __XEN_DRM_ZCOPY_H
 
-#define XENDRMMAP_DRIVER_NAME	"xen-drmmap"
+#define XENDRM_ZCOPY_DRIVER_NAME	"xen_drm_zcopy"
 
 /*
  * Xen DRM map specific ioctls.
@@ -28,10 +26,10 @@
  * [0x40, 0xa0) (a0 is excluded). The numbers below are defined as offset
  * against DRM_COMMAND_BASE and should be between [0x0, 0x60).
  */
-#define DRM_XENDRM_CREATE_DUMB	0x00
+#define DRM_XENDRM_ZCOPY_CREATE_DUMB	0x00
 
 /* XXX: keep this structure properly aligned/padded */
-struct xendrmmap_ioctl_create_dumb {
+struct xendrm_zcopy_ioctl_create_dumb {
 	/* Xen */
 	uint32_t num_grefs;
 	/* FIXME: user-space uses uint32_t instead of grant_ref_t
@@ -42,7 +40,7 @@ struct xendrmmap_ioctl_create_dumb {
 	struct drm_mode_create_dumb dumb;
 };
 
-#define DRM_IOCTL_XENDRM_CREATE_DUMB	DRM_IOWR(DRM_COMMAND_BASE + \
-	DRM_XENDRM_CREATE_DUMB, struct xendrmmap_ioctl_create_dumb)
+#define DRM_IOCTL_XENDRM_ZCOPY_CREATE_DUMB DRM_IOWR(DRM_COMMAND_BASE + \
+	DRM_XENDRM_ZCOPY_CREATE_DUMB, struct xendrm_zcopy_ioctl_create_dumb)
 
-#endif /* __XEN_DRM_MAP_H*/
+#endif /* __XEN_DRM_ZCOPY_H*/

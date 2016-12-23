@@ -1,3 +1,2 @@
 EXTRA_CFLAGS := -I$(src) -g
-obj-m          := xen-drmmap.o
-xen-drmmap-y := xen-drm-map.o
+obj-m          := xen_drm_zcopy.o

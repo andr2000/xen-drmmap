@@ -29,7 +29,7 @@
 #endif
 #include <xen/grant_table.h>
 
-#include "xen-drm-map.h"
+#include "xen_drm_zcopy.h"
 
 struct xen_info {
 	struct drm_device *drm_dev;
@@ -392,7 +392,7 @@ static int xen_gem_create_with_handle(
 	return ret;
 }
 
-static int xendrm_create_dumb_obj(struct xen_gem_object *xen_obj,
+static int XENDRM_ZCOPY_CREATE_DUMB_obj(struct xen_gem_object *xen_obj,
 	struct drm_device *dev, struct drm_file *file_priv, int size)
 {
 	struct drm_gem_object *gem_obj;
@@ -420,7 +420,7 @@ fail:
 }
 
 static int xendrm_do_dumb_create(struct drm_device *dev,
-	struct xendrmmap_ioctl_create_dumb *req,
+	struct xendrm_zcopy_ioctl_create_dumb *req,
 	struct drm_file *file_priv)
 {
 	struct xen_gem_object *xen_obj;
@@ -447,7 +447,7 @@ static int xendrm_do_dumb_create(struct drm_device *dev,
 	ret = xen_do_map(xen_obj);
 	if (ret < 0)
 		goto fail;
-	ret = xendrm_create_dumb_obj(xen_obj, dev, file_priv,
+	ret = XENDRM_ZCOPY_CREATE_DUMB_obj(xen_obj, dev, file_priv,
 		round_up(req->dumb.size, PAGE_SIZE));
 	if (ret < 0)
 		goto fail;
@@ -466,8 +466,8 @@ fail:
 static int xen_create_dumb_ioctl(struct drm_device *dev,
 	void *data, struct drm_file *file_priv)
 {
-	struct xendrmmap_ioctl_create_dumb *req =
-		(struct xendrmmap_ioctl_create_dumb *)data;
+	struct xendrm_zcopy_ioctl_create_dumb *req =
+		(struct xendrm_zcopy_ioctl_create_dumb *)data;
 	struct drm_mode_create_dumb *args = &req->dumb;
 	uint32_t cpp, stride, size;
 
@@ -554,7 +554,7 @@ static struct sg_table *xen_gem_prime_get_sg_table(
 }
 
 static const struct drm_ioctl_desc xen_ioctls[] = {
-	DRM_IOCTL_DEF_DRV(XENDRM_CREATE_DUMB, xen_create_dumb_ioctl,
+	DRM_IOCTL_DEF_DRV(XENDRM_ZCOPY_CREATE_DUMB, xen_create_dumb_ioctl,
 		DRM_AUTH | DRM_CONTROL_ALLOW | DRM_UNLOCKED),
 };
 
@@ -575,8 +575,8 @@ static struct drm_driver xen_driver = {
 	.fops                      = &xen_fops,
 	.ioctls                    = xen_ioctls,
 	.num_ioctls                = ARRAY_SIZE(xen_ioctls),
-	.name                      = XENDRMMAP_DRIVER_NAME,
-	.desc                      = "Xen PV DRM mapper",
+	.name                      = XENDRM_ZCOPY_DRIVER_NAME,
+	.desc                      = "Xen PV DRM zero copy",
 	.date                      = "20161207",
 	.major                     = 1,
 	.minor                     = 0,
@@ -632,12 +632,12 @@ static struct platform_driver xen_ddrv_info = {
 	.probe		= xen_probe,
 	.remove		= xen_remove,
 	.driver		= {
-		.name	= XENDRMMAP_DRIVER_NAME,
+		.name	= XENDRM_ZCOPY_DRIVER_NAME,
 	},
 };
 
 struct platform_device_info xen_ddrv_platform_info = {
-	.name = XENDRMMAP_DRIVER_NAME,
+	.name = XENDRM_ZCOPY_DRIVER_NAME,
 	.id = 0,
 	.num_res = 0,
 	.dma_mask = DMA_BIT_MASK(32),
@@ -651,13 +651,13 @@ static int __init xen_init(void)
 
 	xen_pdev = platform_device_register_full(&xen_ddrv_platform_info);
 	if (!xen_pdev) {
-		DRM_ERROR("Failed to register " XENDRMMAP_DRIVER_NAME \
+		DRM_ERROR("Failed to register " XENDRM_ZCOPY_DRIVER_NAME \
 			" device: %d\n", ret);
 		return -ENODEV;
 	}
 	ret = platform_driver_register(&xen_ddrv_info);
 	if (ret != 0) {
-		DRM_ERROR("Failed to register " XENDRMMAP_DRIVER_NAME \
+		DRM_ERROR("Failed to register " XENDRM_ZCOPY_DRIVER_NAME \
 			" driver: %d\n", ret);
 		platform_device_unregister(xen_pdev);
 		return ret;
@@ -675,5 +675,5 @@ static void __exit xen_cleanup(void)
 module_init(xen_init);
 module_exit(xen_cleanup);
 
-MODULE_DESCRIPTION("Xen DRM buffer mapper");
+MODULE_DESCRIPTION("Xen DRM zero copy");
 MODULE_LICENSE("GPL");
