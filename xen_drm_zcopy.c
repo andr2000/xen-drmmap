@@ -56,16 +56,6 @@ struct xen_gem_object {
 #endif
 };
 
-static const char *gnttabop_error_msgs[] = GNTTABOP_error_msgs;
-
-static const char *xen_gnttab_err_to_string(int16_t status)
-{
-	status = -status;
-	if (status < 0 || status >= ARRAY_SIZE(gnttabop_error_msgs))
-		return "bad status code";
-	return gnttabop_error_msgs[status];
-}
-
 static inline struct xen_gem_object *
 to_xen_gem_obj(struct drm_gem_object *gem_obj)
 {
@@ -258,9 +248,8 @@ static int xen_do_map(struct xen_gem_object *xen_obj)
 		xen_obj->map_info[i].handle = map_ops[i].handle;
 		xen_obj->map_info[i].dev_bus_addr = map_ops[i].dev_bus_addr;
 		if (unlikely(map_ops[i].status != GNTST_okay)) {
-			DRM_ERROR("Failed to set map op for page %d, ref %d: %s (%d)\n",
+			DRM_ERROR("Failed to set map op for page %d, ref %d: %d\n",
 				i, xen_obj->grefs[i],
-				xen_gnttab_err_to_string(map_ops[i].status),
 				map_ops[i].status);
 		}
 	}
@@ -309,9 +298,8 @@ static int xen_do_unmap(struct xen_gem_object *xen_obj)
 		xen_obj->num_pages));
 	for (i = 0; i < xen_obj->num_pages; i++) {
 		if (unlikely(unmap_ops[i].status != GNTST_okay)) {
-			DRM_ERROR("Failed to unmap page %d, ref %d: %s (%d)\n",
+			DRM_ERROR("Failed to unmap page %d, ref %d: %d\n",
 				i, xen_obj->grefs[i],
-				xen_gnttab_err_to_string(unmap_ops[i].status),
 				unmap_ops[i].status);
 		}
 	}
